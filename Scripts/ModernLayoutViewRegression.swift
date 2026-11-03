@@ -1,4 +1,4 @@
-// Compile with ModernMenuBarCollection, ModernMenuBarDiscovery, identity resolver and AppLanguage.
+// Compile with ModernMenuBarCollection, ModernMenuBarDiscovery, profile, identity resolver and AppLanguage.
 import Cocoa
 import SwiftUI
 
@@ -48,7 +48,7 @@ struct ModernLayoutViewRegression {
         let host = NSHostingView(rootView: ModernMenuBarCollection(
             entries: entries, images: [:], showAppIcons: false, isEditable: true, emptyPlaceholder: nil,
             onDrop: { _, _ in assertionFailure("Browsing must not reorder menu bar items") },
-            onSpacerWidthChanged: { _, _ in }, onRemoveSpacer: { _ in }
+            onSpacerChanged: { _, _ in }, onRemoveSpacer: { _ in }
         ))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 76),
                               styleMask: [], backing: .buffered, defer: false)
@@ -149,8 +149,52 @@ struct ModernLayoutViewRegression {
         assert(markerView.accessibilityPerformPress() && markerView.isAccessibilitySelected())
         assert(markerView.menu(for: backgroundEvent) == nil, "The marker must not expose spacer deletion or width controls")
         assert(strip.itemViews.filter(\.isInsertionMarker).count == 1)
+        var spacer = MenuBarLayoutSpacer(section: .visible, width: 64, content: .text, text: "  Focus  ")
+        func updateSpacerView() -> MenuBarLayoutItemView {
+            let entry = ModernMenuBarEntry(id: "spacer:\(spacer.id)", name: "Spacer", bundleID: "com.example.editor",
+                                          pid: -1, frame: .zero, positionKey: nil, identifier: "", nativeTitle: "",
+                                          isVisible: true, spacer: spacer)
+            strip.update(entries: [entry], images: [:])
+            strip.layoutSubtreeIfNeeded()
+            return strip.itemViews[0]
+        }
+        let spacerView = updateSpacerView()
+        assert(spacerView.spacerLabel.stringValue == "Focus" && !spacerView.spacerLabel.isHidden)
+        assert(spacerView.icon.image == nil && spacerView.appIcon.isHidden)
+        assert(spacerView.preferredWidth == 64)
+        let menu = spacerView.menu(for: backgroundEvent)!
+        assert(menu.items.count == 2 && menu.items.allSatisfy { $0.target === spacerView },
+               "A spacer must expose edit and remove actions without an application menu")
+        spacer.content = .symbol
+        spacer.symbolName = "star.fill"
+        assert(updateSpacerView() === spacerView && spacerView.icon.image != nil && spacerView.spacerLabel.isHidden)
+        spacer.content = .blank
+        assert(updateSpacerView() === spacerView && spacerView.icon.image == nil && spacerView.spacerLabel.isHidden)
+        if let directory = ProcessInfo.processInfo.environment["ICE_SPACER_EDITOR_SNAPSHOT_DIR"] {
+            let url = URL(fileURLWithPath: directory)
+            try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            for content in MenuBarLayoutSpacer.Content.allCases {
+                spacer.content = content
+                let editor = NSHostingView(rootView: MenuBarSpacerEditor(spacer: spacer) { _ in }
+                    .background(Color(nsColor: .windowBackgroundColor)))
+                editor.appearance = NSAppearance(named: .aqua)
+                let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 280, height: 240),
+                                     styleMask: [], backing: .buffered, defer: false)
+                panel.contentView = editor
+                editor.layoutSubtreeIfNeeded()
+                let size = editor.fittingSize
+                assert(size.width == 280 && size.height > 120)
+                panel.setContentSize(size)
+                editor.layoutSubtreeIfNeeded()
+                let bitmap = editor.bitmapImageRepForCachingDisplay(in: editor.bounds)!
+                editor.cacheDisplay(in: editor.bounds, to: bitmap)
+                try! bitmap.representation(using: .png, properties: [:])!
+                    .write(to: url.appendingPathComponent("\(content.rawValue).png"))
+            }
+        }
         print("Modern layout: fallback icons, app badges, hit testing, selection accessibility, single row, stable views and background drag rejection passed")
         print("Horizontal browsing: empty-space panning, mouse wheel, trackpad, both edges, last-item selection and refresh offset passed")
         print("Insertion marker: one row, fixed geometry, bilingual two-line rendering, label hit testing, selection and distinct spacer behavior passed")
+        print("Spacer views: trimmed text, template symbols, blank content, stable native views and edit/remove actions passed")
     }
 }

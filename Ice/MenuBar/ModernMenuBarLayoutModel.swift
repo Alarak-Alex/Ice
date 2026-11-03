@@ -574,9 +574,10 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         for spacer in activeProfile?.spacers.filter({ $0.section == section }) ?? [] {
             let id = "spacer:\(spacer.id.uuidString)"
             let entry = Entry(
-                id: id, name: AppLanguage.localized("Spacer"), bundleID: Constants.bundleIdentifier,
+                id: id, name: spacer.content == .text && !spacer.trimmedText.isEmpty
+                    ? spacer.trimmedText : AppLanguage.localized("Spacer"), bundleID: Constants.bundleIdentifier,
                 pid: getpid(), frame: .zero, positionKey: MenuBarSpacerManager.positionKey(for: spacer.id), identifier: id, nativeTitle: "",
-                isVisible: spacer.section == .visible, isSpacer: true, spacerWidth: spacer.validatedWidth
+                isVisible: spacer.section == .visible, spacer: spacer
             )
             if let beforeID = spacer.beforeID, let index = result.firstIndex(where: { $0.id == beforeID }) {
                 result.insert(entry, at: index)
@@ -730,10 +731,16 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         }
     }
 
-    func updateSpacerWidth(_ sourceID: String, to width: Double) {
-        guard !isBusy, width.isFinite, let profileIndex = profiles.firstIndex(where: { $0.id == activeProfileID }),
+    func updateSpacer(_ sourceID: String, to updated: MenuBarLayoutSpacer) {
+        guard !isBusy, updated.width.isFinite, sourceID == "spacer:\(updated.id.uuidString)",
+              let profileIndex = profiles.firstIndex(where: { $0.id == activeProfileID }),
               let index = profiles[profileIndex].spacers.firstIndex(where: { "spacer:\($0.id.uuidString)" == sourceID }) else { return }
-        profiles[profileIndex].spacers[index].width = min(200, max(1, width.rounded()))
+        guard updated.content != .symbol || NSImage(systemSymbolName: updated.trimmedSymbolName, accessibilityDescription: nil) != nil else { return }
+        // An open editor must not restore an old section or insertion anchor.
+        profiles[profileIndex].spacers[index].width = Double(updated.validatedWidth)
+        profiles[profileIndex].spacers[index].content = updated.content
+        profiles[profileIndex].spacers[index].text = updated.text
+        profiles[profileIndex].spacers[index].symbolName = updated.symbolName
         saveProfiles()
     }
 

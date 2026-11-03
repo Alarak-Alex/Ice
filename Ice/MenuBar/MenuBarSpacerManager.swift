@@ -9,6 +9,7 @@ protocol MenuBarSpacerManaging: AnyObject {
 @MainActor
 final class MenuBarSpacerManager: MenuBarSpacerManaging {
     private(set) var items = [UUID: NSStatusItem]()
+    private var renderedSpacers = [UUID: MenuBarLayoutSpacer]()
 
     deinit {
         for item in items.values { NSStatusBar.system.removeStatusItem(item) }
@@ -22,6 +23,7 @@ final class MenuBarSpacerManager: MenuBarSpacerManaging {
         let wanted = Set(spacers.map(\.id))
         for id in Array(items.keys) where !wanted.contains(id) {
             if let item = items.removeValue(forKey: id) { NSStatusBar.system.removeStatusItem(item) }
+            renderedSpacers.removeValue(forKey: id)
         }
         for spacer in spacers {
             let item: NSStatusItem
@@ -32,19 +34,32 @@ final class MenuBarSpacerManager: MenuBarSpacerManaging {
                 item.autosaveName = "Spacer-\(spacer.id.uuidString)"
                 items[spacer.id] = item
             }
-            item.length = spacer.validatedWidth
+            if item.length != spacer.validatedWidth { item.length = spacer.validatedWidth }
             if let button = item.button {
                 let name = "Spacer-\(spacer.id.uuidString)"
-                let imageSize = NSSize(width: spacer.validatedWidth, height: 16)
-                // Keep explicit blank content, matching the reference spacer setup.
-                if button.image?.size != imageSize {
-                    button.image = NSImage(size: imageSize)
+                let previous = renderedSpacers[spacer.id]
+                if previous?.validatedWidth != spacer.validatedWidth || previous?.content != spacer.content ||
+                    previous?.trimmedText != spacer.trimmedText || previous?.trimmedSymbolName != spacer.trimmedSymbolName {
+                    button.title = ""
+                    button.image = nil
+                    button.imagePosition = .imageOnly
+                    switch spacer.content {
+                    case .text where !spacer.trimmedText.isEmpty:
+                        button.title = spacer.trimmedText
+                        button.imagePosition = .noImage
+                    case .symbol:
+                        button.image = NSImage(systemSymbolName: spacer.trimmedSymbolName, accessibilityDescription: nil)
+                            ?? NSImage(size: NSSize(width: spacer.validatedWidth, height: 16))
+                    case .blank, .text:
+                        // Empty content still needs an image for MenuBarAgent registration.
+                        button.image = NSImage(size: NSSize(width: spacer.validatedWidth, height: 16))
+                    }
                 }
-                button.title = ""
-                button.imagePosition = .imageOnly
+                renderedSpacers[spacer.id] = spacer
                 button.identifier = NSUserInterfaceItemIdentifier(name)
                 button.setAccessibilityIdentifier(name)
-                button.setAccessibilityLabel(AppLanguage.localized("Spacer"))
+                button.setAccessibilityLabel(spacer.content == .text && !spacer.trimmedText.isEmpty
+                    ? spacer.trimmedText : AppLanguage.localized("Spacer"))
                 button.toolTip = AppLanguage.localized("Spacer")
             }
             item.isVisible = spacer.section == .visible

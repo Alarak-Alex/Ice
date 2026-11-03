@@ -40,14 +40,47 @@ struct MenuBarNewItemPlacement: Codable, Equatable {
 }
 
 struct MenuBarLayoutSpacer: Codable, Identifiable, Equatable {
+    enum Content: String, Codable, CaseIterable {
+        case blank, text, symbol
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .blank: "None"
+            case .text: "Text"
+            case .symbol: "Symbol"
+            }
+        }
+    }
+
     var id = UUID()
     var section: MenuBarLayoutSection
     var beforeID: String?
     var width: Double = 16
+    var content: Content = .blank
+    var text = ""
+    var symbolName = "star"
+
+    var trimmedText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    var trimmedSymbolName: String { symbolName.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var validatedWidth: CGFloat {
         guard width.isFinite else { return 16 }
         return CGFloat(min(200, max(1, width.rounded())))
+    }
+}
+
+extension MenuBarLayoutSpacer {
+    private enum CodingKeys: String, CodingKey { case id, section, beforeID, width, content, text, symbolName }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        section = try container.decode(MenuBarLayoutSection.self, forKey: .section)
+        beforeID = try container.decodeIfPresent(String.self, forKey: .beforeID)
+        width = try container.decodeIfPresent(Double.self, forKey: .width) ?? 16
+        content = Content(rawValue: try container.decodeIfPresent(String.self, forKey: .content) ?? "") ?? .blank
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        symbolName = try container.decodeIfPresent(String.self, forKey: .symbolName) ?? "star"
     }
 }
 

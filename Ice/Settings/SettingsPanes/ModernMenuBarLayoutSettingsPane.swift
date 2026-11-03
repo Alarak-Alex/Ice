@@ -207,7 +207,7 @@ struct ModernMenuBarLayoutSettingsPane: View {
                     let targetID = sectionEntries.dropFirst(max(0, index)).first { $0.id != source }?.id
                     Task { await model.drop(source, in: section, before: targetID) }
                 },
-                onSpacerWidthChanged: model.updateSpacerWidth,
+                onSpacerChanged: model.updateSpacer,
                 onRemoveSpacer: model.removeSpacer
             )
             .frame(height: 76)

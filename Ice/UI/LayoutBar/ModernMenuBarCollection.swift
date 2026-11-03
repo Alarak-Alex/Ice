@@ -19,7 +19,7 @@ struct ModernMenuBarCollection: NSViewRepresentable {
     let isEditable: Bool
     let emptyPlaceholder: String?
     let onDrop: (String, Int) -> Void
-    let onSpacerWidthChanged: (String, Double) -> Void
+    let onSpacerChanged: (String, MenuBarLayoutSpacer) -> Void
     let onRemoveSpacer: (String) -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -42,7 +42,7 @@ struct ModernMenuBarCollection: NSViewRepresentable {
         strip.isEditable = isEditable
         strip.showAppIcons = showAppIcons
         strip.onDrop = onDrop
-        strip.onSpacerWidthChanged = onSpacerWidthChanged
+        strip.onSpacerChanged = onSpacerChanged
         strip.onRemoveSpacer = onRemoveSpacer
         strip.placeholder.stringValue = emptyPlaceholder ?? ""
         strip.update(entries: entries, images: images)
@@ -162,7 +162,7 @@ final class MenuBarLayoutItemStrip: NSView {
     var isEditable = false
     var showAppIcons = true
     var onDrop: ((String, Int) -> Void)?
-    var onSpacerWidthChanged: ((String, Double) -> Void)?
+    var onSpacerChanged: ((String, MenuBarLayoutSpacer) -> Void)?
     var onRemoveSpacer: ((String) -> Void)?
     let placeholder = NSTextField(labelWithString: "")
     private(set) var itemViews = [MenuBarLayoutItemView]()
@@ -208,9 +208,8 @@ final class MenuBarLayoutItemStrip: NSView {
         for view in itemViews where !identifiers.contains(view.entryID) { view.removeFromSuperview() }
         itemViews = entries.map { entry in
             let item = previous[entry.id] ?? MenuBarLayoutItemView(entryID: entry.id)
-            item.isSpacer = entry.isSpacer
+            item.spacer = entry.spacer
             item.isInsertionMarker = entry.isInsertionMarker
-            item.spacerWidth = entry.spacerWidth
             item.updateImages(itemImage: entry.isSpacer || entry.isInsertionMarker ? nil : images[entry.id],
                               appImage: entry.isSpacer || entry.isInsertionMarker ? nil : NSRunningApplication(processIdentifier: entry.pid)?.icon,
                               showAppIcon: showAppIcons && !entry.isSpacer && !entry.isInsertionMarker)
@@ -218,7 +217,7 @@ final class MenuBarLayoutItemStrip: NSView {
             item.toolTip = entry.name
             item.setAccessibilityLabel(entry.name)
             item.onSelect = { [weak self] in self?.select(entry.id) }
-            item.onWidthChanged = { [weak self] width in self?.onSpacerWidthChanged?(entry.id, width) }
+            item.onSpacerChanged = { [weak self] spacer in self?.onSpacerChanged?(entry.id, spacer) }
             item.onRemove = { [weak self] in self?.onRemoveSpacer?(entry.id) }
             if item.superview !== self { addSubview(item) }
             return item
@@ -285,9 +284,13 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     let entryID: String
     let icon = NSImageView()
     let appIcon = NSImageView()
+    let spacerLabel = NSTextField(labelWithString: "")
     let insertionLabel = NSTextField(wrappingLabelWithString: AppLanguage.localized("New Items\nhere"))
     var isEditable = false
-    var isSpacer = false { didSet { needsDisplay = true } }
+    var spacer: MenuBarLayoutSpacer? {
+        didSet { needsDisplay = true; needsLayout = true }
+    }
+    var isSpacer: Bool { spacer != nil }
     var isInsertionMarker = false {
         didSet {
             insertionLabel.isHidden = !isInsertionMarker
@@ -295,9 +298,8 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
             needsLayout = true
         }
     }
-    var spacerWidth: CGFloat = 16 { didSet { needsLayout = true } }
     var onSelect: (() -> Void)?
-    var onWidthChanged: ((Double) -> Void)?
+    var onSpacerChanged: ((MenuBarLayoutSpacer) -> Void)?
     var onRemove: (() -> Void)?
     private var widthPopover: NSPopover?
     private var didDrag = false
@@ -305,7 +307,7 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     private var hasItemImage = false
     var preferredWidth: CGFloat {
         if isInsertionMarker { return 88 }
-        if isSpacer { return max(16, spacerWidth) }
+        if let spacer { return max(16, spacer.validatedWidth) }
         return max(40, min(300, (hasItemImage ? icon.image?.size.width ?? 0 : 18) + (appIcon.isHidden ? 20 : 35)))
     }
     var isSelected = false {
@@ -324,6 +326,13 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
         appIcon.imageScaling = .scaleProportionallyDown
         addSubview(icon)
         addSubview(appIcon)
+        spacerLabel.font = .menuBarFont(ofSize: 13)
+        spacerLabel.textColor = .white
+        spacerLabel.alignment = .center
+        spacerLabel.lineBreakMode = .byTruncatingTail
+        spacerLabel.isHidden = true
+        spacerLabel.setAccessibilityElement(false)
+        addSubview(spacerLabel)
         insertionLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         insertionLabel.textColor = .white
         insertionLabel.alignment = .center
@@ -343,16 +352,35 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
 
     func updateImages(itemImage: NSImage?, appImage: NSImage?, showAppIcon: Bool) {
+        if let spacer {
+            hasItemImage = false
+            icon.image = spacer.content == .symbol
+                ? NSImage(systemSymbolName: spacer.trimmedSymbolName, accessibilityDescription: nil) : nil
+            icon.contentTintColor = .white
+            self.appIcon.image = nil
+            self.appIcon.isHidden = true
+            spacerLabel.stringValue = spacer.content == .text ? spacer.trimmedText : ""
+            spacerLabel.isHidden = spacerLabel.stringValue.isEmpty
+            needsLayout = true
+            return
+        }
         hasItemImage = itemImage != nil
+        icon.contentTintColor = nil
         icon.image = itemImage ?? appImage
         appIcon.image = appImage
         appIcon.isHidden = !showAppIcon || itemImage == nil || appImage == nil
+        spacerLabel.isHidden = true
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
-        if isSpacer || isInsertionMarker {
+        if isSpacer {
+            let size = min(18, max(0, bounds.width - 4))
+            icon.frame = NSRect(x: (bounds.width - size) / 2, y: (bounds.height - size) / 2, width: size, height: size)
+            appIcon.frame = .zero
+            spacerLabel.frame = NSRect(x: 2, y: (bounds.height - 18) / 2, width: max(0, bounds.width - 4), height: 18)
+        } else if isInsertionMarker {
             icon.frame = .zero
             appIcon.frame = .zero
             insertionLabel.frame = bounds.insetBy(dx: 6, dy: 3)
@@ -376,7 +404,7 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
             shape.stroke()
             return
         }
-        guard isSpacer else { return }
+        guard isSpacer, icon.image == nil, spacerLabel.stringValue.isEmpty else { return }
         NSColor.controlAccentColor.withAlphaComponent(0.9).setStroke()
         let path = NSBezierPath()
         path.lineWidth = 2
@@ -391,15 +419,21 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
 
     override func accessibilityPerformPress() -> Bool {
         onSelect?()
+        showSpacerEditor()
         return true
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard isSpacer, isEditable, !didDrag else { return }
+        guard !didDrag, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        showSpacerEditor()
+    }
+
+    @objc private func showSpacerEditor() {
+        guard let spacer, isEditable, window != nil else { return }
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: MenuBarSpacerWidthEditor(width: spacerWidth) { [weak self] width in
-            self?.onWidthChanged?(width)
+        popover.contentViewController = NSHostingController(rootView: MenuBarSpacerEditor(spacer: spacer) { [weak self] updated in
+            self?.onSpacerChanged?(updated)
         }.environment(\.locale, AppLanguage.current.locale))
         widthPopover?.close()
         widthPopover = popover
@@ -409,10 +443,18 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     override func menu(for event: NSEvent) -> NSMenu? {
         guard isSpacer, isEditable else { return nil }
         let menu = NSMenu()
+        let edit = NSMenuItem(title: AppLanguage.localized("Edit Spacer…"), action: #selector(showSpacerEditor), keyEquivalent: "")
+        edit.target = self
+        menu.addItem(edit)
         let remove = NSMenuItem(title: AppLanguage.localized("Remove Spacer"), action: #selector(removeSpacer), keyEquivalent: "")
         remove.target = self
         menu.addItem(remove)
         return menu
+    }
+
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        if newSuperview == nil { widthPopover?.close(); widthPopover = nil }
+        super.viewWillMove(toSuperview: newSuperview)
     }
 
     @objc private func removeSpacer() {
@@ -432,7 +474,7 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
         pasteboard.setString(entryID, forType: MenuBarLayoutItemStrip.pasteboardType)
         let draggingItem = NSDraggingItem(pasteboardWriter: pasteboard)
         let preview: NSImage?
-        if isInsertionMarker, let bitmap = bitmapImageRepForCachingDisplay(in: bounds) {
+        if (isInsertionMarker || isSpacer), let bitmap = bitmapImageRepForCachingDisplay(in: bounds) {
             cacheDisplay(in: bounds, to: bitmap)
             let image = NSImage(size: bounds.size)
             image.addRepresentation(bitmap)
@@ -452,21 +494,56 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     }
 }
 
-private struct MenuBarSpacerWidthEditor: View {
-    @State var width: Double
-    let onChange: (Double) -> Void
+struct MenuBarSpacerEditor: View {
+    @State var spacer: MenuBarLayoutSpacer
+    let onChange: (MenuBarLayoutSpacer) -> Void
+
+    private var symbolImage: NSImage? {
+        NSImage(systemSymbolName: spacer.trimmedSymbolName, accessibilityDescription: nil)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Spacer Width").font(.headline)
+            Text("Edit Spacer…").font(.headline)
+            Picker("Content", selection: $spacer.content) {
+                ForEach(MenuBarLayoutSpacer.Content.allCases, id: \.self) { content in
+                    Text(content.title).tag(content)
+                }
+            }
+            .pickerStyle(.segmented)
+            switch spacer.content {
+            case .blank:
+                Text("A plain, empty spacer.").foregroundStyle(.secondary)
+            case .text:
+                TextField("Text", text: $spacer.text).textFieldStyle(.roundedBorder)
+            case .symbol:
+                HStack {
+                    TextField("SF Symbol Name", text: $spacer.symbolName).textFieldStyle(.roundedBorder)
+                    if let symbolImage {
+                        Image(nsImage: symbolImage).frame(width: 20, height: 20)
+                    }
+                }
+                if symbolImage == nil {
+                    Text("Enter a valid SF Symbol name.").foregroundStyle(.secondary)
+                }
+            }
+            Text("Spacer Width").font(.subheadline.weight(.medium))
             HStack {
-                Slider(value: $width, in: 1...200, step: 1).accessibilityLabel("Spacer Width")
-                TextField("Spacer Width", value: $width, format: .number.precision(.fractionLength(0)))
+                Slider(value: $spacer.width, in: 1...200).accessibilityLabel("Spacer Width")
+                TextField("Spacer Width", value: $spacer.width, format: .number.precision(.fractionLength(0)))
                     .frame(width: 48)
             }
         }
         .padding(14)
-        .frame(width: 250)
-        .onChange(of: width) { _, value in onChange(value) }
+        .frame(width: 280)
+        .onChange(of: spacer) { _, value in
+            guard value.width.isFinite else { return }
+            if value.width != Double(value.validatedWidth) {
+                spacer.width = Double(value.validatedWidth)
+                return
+            }
+            guard value.content != .symbol || symbolImage != nil else { return }
+            onChange(value)
+        }
     }
 }

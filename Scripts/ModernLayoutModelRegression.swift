@@ -43,6 +43,17 @@ struct ModernLayoutModelRegression {
         let suite = "com.jordanbaird.Ice.Regression.\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
+        let legacySpacerData = Data("""
+        {"id":"4C94DA46-2003-407F-89EE-5B410183BCDE","section":"hidden","width":32}
+        """.utf8)
+        let legacySpacer = try JSONDecoder().decode(MenuBarLayoutSpacer.self, from: legacySpacerData)
+        assert(legacySpacer.content == .blank && legacySpacer.width == 32 && legacySpacer.section == .hidden)
+        assert(legacySpacer.text.isEmpty && legacySpacer.symbolName == "star",
+               "Saved spacers without content must retain their identity and decode as blank")
+        let futureSpacerData = Data(String(data: legacySpacerData, encoding: .utf8)!
+            .replacingOccurrences(of: "\"width\":32", with: "\"width\":32,\"content\":\"future\"").utf8)
+        let futureSpacer = try JSONDecoder().decode(MenuBarLayoutSpacer.self, from: futureSpacerData)
+        assert(futureSpacer.id == legacySpacer.id && futureSpacer.content == .blank)
         let nativeSpacers = MenuBarSpacerManager()
         var nativeSpacer = MenuBarLayoutSpacer(section: .visible)
         nativeSpacers.synchronize([nativeSpacer])
@@ -53,12 +64,41 @@ struct ModernLayoutModelRegression {
                "A spacer must supply an explicit blank image at its configured width")
         assert(nativeItem.button?.identifier?.rawValue == nativeName)
         assert(nativeItem.button?.imagePosition == .imageOnly && nativeItem.button?.title == "")
+        let originalImage = nativeItem.button?.image
+        nativeSpacers.synchronize([nativeSpacer])
+        assert(nativeItem.button?.image === originalImage, "Unchanged spacers must reuse their rendered content")
+        nativeSpacer.beforeID = "changed-anchor"
+        nativeSpacers.synchronize([nativeSpacer])
+        assert(nativeItem.button?.image === originalImage, "Moving a spacer must not allocate another image")
         nativeSpacer.width = 48
         nativeSpacers.synchronize([nativeSpacer])
         assert(nativeSpacers.items[nativeSpacer.id] === nativeItem, "Resizing must retain native item identity")
         assert(nativeItem.length == 48 && nativeItem.button?.image?.size.width == 48)
+        nativeSpacer.content = .text
+        nativeSpacer.text = "  工作  \n"
+        nativeSpacers.synchronize([nativeSpacer])
+        // AppKit substitutes an internal placeholder image after clearing it.
+        assert(nativeItem.button?.title == "工作")
+        assert(nativeItem.button?.imagePosition == .noImage)
+        nativeSpacer.content = .symbol
+        nativeSpacer.symbolName = "star.fill"
+        nativeSpacers.synchronize([nativeSpacer])
+        assert(nativeItem.button?.title == "" && nativeItem.button?.image?.isTemplate == true)
+        assert(nativeItem.button?.imagePosition == .imageOnly)
+        nativeSpacer.symbolName = "ice.nonexistent.symbol"
+        nativeSpacers.synchronize([nativeSpacer])
+        assert(nativeItem.button?.image?.size == NSSize(width: 48, height: 16),
+               "An unavailable saved symbol must retain an explicit blank native host")
+        nativeSpacer.content = .blank
+        nativeSpacers.synchronize([nativeSpacer])
+        assert(nativeItem.button?.title == "" && nativeItem.button?.image?.size.width == 48)
+        assert(nativeSpacers.items[nativeSpacer.id] === nativeItem, "Content edits must retain native identity")
         nativeSpacers.synchronize([])
         assert(nativeSpacers.items.isEmpty)
+        nativeSpacers.synchronize([nativeSpacer])
+        assert(nativeSpacers.items[nativeSpacer.id]?.button?.image != nil,
+               "Removing a spacer must also discard cached render state before recreating its host")
+        nativeSpacers.synchronize([])
         let keys = (1...3).map { "status:com.example.\($0)::Item-0" }
         let initial = Dictionary(uniqueKeysWithValues: zip(keys, [300.0, 200.0, 100.0]))
         let positionURL = root.appendingPathComponent("positions.plist")
@@ -211,12 +251,40 @@ struct ModernLayoutModelRegression {
         let spacerKey = MenuBarSpacerManager.positionKey(for: spacer.id)
         assert(spacers.visible.contains(spacer.id) && currentPositions()[spacerKey] != nil)
         assert(currentPositions()[spacerKey]! > currentPositions()[keys[0]]!)
-        model.updateSpacerWidth(sourceID, to: 900)
+        var editedSpacer = spacer
+        editedSpacer.width = 900
+        model.updateSpacer(sourceID, to: editedSpacer)
         assert(spacers.widths[spacer.id] == 200)
-        model.updateSpacerWidth(sourceID, to: 48)
+        editedSpacer.width = 48
+        model.updateSpacer(sourceID, to: editedSpacer)
         assert(spacers.widths[spacer.id] == 48)
-        model.updateSpacerWidth(sourceID, to: .nan)
+        editedSpacer.width = .nan
+        model.updateSpacer(sourceID, to: editedSpacer)
         assert(spacers.widths[spacer.id] == 48, "Invalid widths must not reach the native host")
+        editedSpacer.width = 48
+        editedSpacer.content = .text
+        editedSpacer.text = "Work"
+        editedSpacer.section = .hidden
+        editedSpacer.beforeID = "stale-anchor"
+        model.updateSpacer(sourceID, to: editedSpacer)
+        assert(model.activeProfile!.spacers[0].section == .visible && model.activeProfile!.spacers[0].beforeID == spacer.beforeID,
+               "An old editor value must not overwrite a spacer's current section or insertion anchor")
+        let editedEntry = model.displayEntries(in: .visible).first(where: { $0.id == sourceID })
+        assert(editedEntry?.spacer?.text == "Work" && editedEntry?.name == "Work",
+               "A text spacer must expose its content to accessibility and tooltips")
+        editedSpacer.content = .symbol
+        editedSpacer.symbolName = "star.fill"
+        model.updateSpacer(sourceID, to: editedSpacer)
+        let savedSymbolProfiles = currentProfiles()
+        editedSpacer.symbolName = "ice.nonexistent.symbol"
+        model.updateSpacer(sourceID, to: editedSpacer)
+        assert(currentProfiles() == savedSymbolProfiles, "Invalid symbols must not replace saved content")
+        editedSpacer.id = UUID()
+        model.updateSpacer(sourceID, to: editedSpacer)
+        assert(currentProfiles() == savedSymbolProfiles, "An editor cannot change another spacer's identity")
+        let reloadedContentModel = ModernMenuBarLayoutModel(defaults: defaults, positionStore: positions, visibilityStore: visibility)
+        assert(reloadedContentModel.activeProfile!.spacers[0].content == .symbol &&
+               reloadedContentModel.activeProfile!.spacers[0].symbolName == "star.fill")
         await model.undo()
         assert(model.activeProfile!.spacers.isEmpty && spacers.visible.isEmpty)
         assert(currentPositions() == beforeSpacer, "Undo must remove a newly registered spacer position")
@@ -236,16 +304,25 @@ struct ModernLayoutModelRegression {
         await model.selectProfile(retainedProfile)
         assert(currentPositions()[retainedKey] == savedPosition,
                "Profile selection must register native spacers before restoring their saved positions")
-        model.updateSpacerWidth(retainedID, to: 48)
+        var retainedEdit = retained
+        retainedEdit.width = 48
+        retainedEdit.content = .text
+        retainedEdit.text = "Focus"
+        model.updateSpacer(retainedID, to: retainedEdit)
         let originalProfile = model.activeProfileID!
         model.createProfile(named: "Copied spacer")
         let copiedProfile = model.activeProfileID!
         assert(model.activeProfile!.spacers.first!.id == retained.id, "Copied configurations must retain their spacers")
-        model.updateSpacerWidth(retainedID, to: 32)
+        retainedEdit.width = 32
+        retainedEdit.content = .symbol
+        retainedEdit.symbolName = "moon.fill"
+        model.updateSpacer(retainedID, to: retainedEdit)
         await model.selectProfile(originalProfile)
         assert(spacers.widths[retained.id] == 48)
+        assert(model.activeProfile!.spacers[0].content == .text && model.activeProfile!.spacers[0].text == "Focus")
         await model.undo()
         assert(model.activeProfileID == copiedProfile && spacers.widths[retained.id] == 32)
+        assert(model.activeProfile!.spacers[0].content == .symbol && model.activeProfile!.spacers[0].symbolName == "moon.fill")
         await model.deleteActiveProfile()
         assert(!model.profiles.contains { $0.id == copiedProfile })
         await model.undo()
@@ -438,6 +515,7 @@ struct ModernLayoutModelRegression {
         print("Background discovery: nonblocking editor state and stale scan rejection passed")
         print("Image cache lifetime: departed images released, current images reused and disk images restored")
         print("Temporary reveal: Hidden only, unchanged Always Hidden, idempotence, authored layout preservation, restoration and edit cleanup passed")
-        print("Native spacers: explicit blank image, stable native identifier, image-only rendering, resizing and removal passed")
+        print("Spacer content: legacy decoding, text/symbol persistence, invalid symbol rejection, stable anchors and profile copy/undo passed")
+        print("Native spacers: blank/text/symbol rendering, stable identity, cached images, fallback content, resizing and removal passed")
     }
 }

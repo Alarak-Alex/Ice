@@ -14,11 +14,11 @@ struct ModernMenuBarEntry: Identifiable {
     let identifier: String
     let nativeTitle: String
     let isVisible: Bool
-    let isSpacer: Bool
-    let spacerWidth: CGFloat
+    let spacer: MenuBarLayoutSpacer?
+    var isSpacer: Bool { spacer != nil }
 
     init(id: String, name: String, bundleID: String, pid: pid_t, frame: CGRect, positionKey: String?, identifier: String,
-         nativeTitle: String, isVisible: Bool, isSpacer: Bool = false, spacerWidth: CGFloat = 0) {
+         nativeTitle: String, isVisible: Bool, spacer: MenuBarLayoutSpacer? = nil) {
         self.id = id
         self.name = name
         self.bundleID = bundleID
@@ -28,8 +28,7 @@ struct ModernMenuBarEntry: Identifiable {
         self.identifier = identifier
         self.nativeTitle = nativeTitle
         self.isVisible = isVisible
-        self.isSpacer = isSpacer
-        self.spacerWidth = spacerWidth
+        self.spacer = spacer
     }
 }
 

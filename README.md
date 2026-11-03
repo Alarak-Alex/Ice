@@ -45,10 +45,12 @@ November 3, 2026.
 - **Horizontal browsing:** use a horizontal trackpad gesture, a mouse wheel,
   the native scrollbar, or drag the strip's empty background to reach overflow
   items. Refresh preserves the browsing position; dragging an icon reorders it.
-- **Palette spacers:** persisted spacer widths of 1–200 points, native status
-  items with stable identities and explicit blank images, width editing,
-  removal, and rollback when native registration fails. Physical spacer
-  registration and drag/drop still need runtime acceptance.
+- **Palette spacers:** widths of 1–200 points with blank, text, or SF Symbol
+  content, an editor with symbol validation, removal, and rollback when native
+  registration fails. Native identities remain stable through content edits,
+  and existing blank spacers remain compatible. Startup registration of a saved
+  spacer was verified locally; physical palette drag/drop and placement still
+  need runtime acceptance.
 - **Hidden-item reveal on macOS 27:** blank-space clicks are routed to
   temporarily reveal the Hidden section, excluding Always Hidden. Separate
   recovery journals restore original visibility after image recapture or

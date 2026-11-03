@@ -46,10 +46,12 @@ updated since 2025-09.
 - Palette spacers own native NSStatusItems with stable autosave names and
   validated widths of 1–200 points. Profile selection registers visible spacers
   before restoring their saved positions. Registration failures restore metadata
-  and the prior native hosts. The native button has an explicit blank image,
-  image-only positioning, and stable button/accessibility identifiers, matching
-  the observed reference setup. Native registration/drop acceptance remains
-  unverified.
+  and the prior native hosts. Content can be blank, trimmed text, or an SF Symbol.
+  The editor validates symbol names and preserves current placement when editing
+  an older snapshot. Blank content has an explicit image; native items keep
+  stable button/accessibility identifiers. Unchanged content reuses its image.
+  Saved-spacer startup registration was verified locally; physical palette
+  drag/drop and placement remain unverified.
 - Blank-menu-space clicks on macOS 27 route to the modern hidden-section
   reveal path. Only Hidden applications and spacers are revealed; Always Hidden
   stays concealed. The original approvals are journaled separately from image
@@ -139,6 +141,7 @@ swiftc -parse-as-library \
 swiftc -parse-as-library \
   Ice/UI/LayoutBar/ModernMenuBarCollection.swift \
   Ice/MenuBar/ModernMenuBarDiscovery.swift \
+  Ice/MenuBar/MenuBarLayoutProfile.swift \
   Ice/MenuBar/MenuBarItemIdentityResolver.swift \
   Ice/Utilities/AppLanguage.swift \
   Scripts/ModernLayoutViewRegression.swift -o /tmp/ice-modern-view-regression
@@ -193,8 +196,10 @@ the test process's queue: observation preserves event order without repeated
 delivery, cancellation stops delivery, and all four publishers release
 cancelled subscribers.
 
-The model fixture additionally checks explicit native spacer image content,
-stable identity on resize and manager removal, Hidden-only temporary reveal,
+The model fixture additionally checks blank/text/symbol native content,
+legacy spacer decoding, invalid-symbol rejection, unchanged-image reuse,
+stable identity on resize/content changes and manager removal, content persistence
+across profile copy/switch/undo, stale editor anchors, Hidden-only temporary reveal,
 Always Hidden exclusion, repeated show requests, unchanged profiles/order,
 exact approval restoration, quit/startup recovery, and restoring temporary
 visibility before permanent layout edits.
@@ -221,8 +226,13 @@ hidden-spacer reveal behavior and multiple displays still require runtime proof.
 The native horizontal scrollbar reached its right end in the installed app.
 The later palette drag attempt through background automation did not produce an
 accepted drop.
-A temporary profile fixture was restored byte-for-byte before it was launched;
-it supplies no additional native-registration proof.
+An earlier temporary profile fixture was restored before launch and supplies no
+native-registration proof. A later saved-spacer fixture was launched in the
+installed Ice, and MenuBarAgent registered its stable native position key.
+The temporary spacer was removed and the original profile data restored
+byte-for-byte. This proves startup registration, not physical palette drop or
+placement. The user's saved pre-validation order and visibility were restored
+and checked again after restarting Ice.
 
 Performance samples taken on 2026-11-03 no longer contained the old
 `RunLoopLocalEventMonitor` queue-reposting hotspot. One post-change sample
