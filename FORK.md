@@ -204,6 +204,14 @@ Always Hidden exclusion, repeated show requests, unchanged profiles/order,
 exact approval restoration, quit/startup recovery, and restoring temporary
 visibility before permanent layout edits.
 
+Mixed-order fixtures exhaust every icon/spacer source and destination with one
+or two spacers, including adjacent spacer chains and end insertion. They compare
+the editor against native position records, preserve unrelated native keys and
+visibility, and verify undo restores both positions and anchors. Additional
+fixtures cover externally authored order, unregistered hidden spacer targets,
+and moving an anchor out of its section. These checks use temporary stores and
+preferences domains; they do not rearrange the user's menu bar.
+
 The navigation fixture loads the production sidebar with placeholder detail
 panes. It checks all six native table rows, first-mouse acceptance, isolated
 search and row hit areas, pane selection, navigation history and search filtering
@@ -233,6 +241,9 @@ The temporary spacer was removed and the original profile data restored
 byte-for-byte. This proves startup registration, not physical palette drop or
 placement. The user's saved pre-validation order and visibility were restored
 and checked again after restarting Ice.
+The user subsequently arranged the menu bar manually. That newer state is the
+baseline for further verification; older restoration snapshots must not replace
+it.
 
 Performance samples taken on 2026-11-03 no longer contained the old
 `RunLoopLocalEventMonitor` queue-reposting hotspot. One post-change sample

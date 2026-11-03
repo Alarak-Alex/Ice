@@ -48,7 +48,9 @@ November 3, 2026.
 - **Palette spacers:** widths of 1–200 points with blank, text, or SF Symbol
   content, an editor with symbol validation, removal, and rollback when native
   registration fails. Native identities remain stable through content edits,
-  and existing blank spacers remain compatible. Startup registration of a saved
+  and existing blank spacers remain compatible. Icon/spacer sorting uses the
+  same native order, preserves hidden spacer anchors, and supports undo.
+  Startup registration of a saved
   spacer was verified locally; physical palette drag/drop and placement still
   need runtime acceptance.
 - **Hidden-item reveal on macOS 27:** blank-space clicks are routed to
@@ -79,7 +81,7 @@ Implementation details and reproducible regression commands are in
 | macOS 14–26 | Original layout/hiding engine retained; macOS 26 runtime and appearance have not been verified |
 | macOS 27 | Separate layout editor and native order/visibility paths; signed Release build and installation verified locally |
 | Local toolchain | Xcode 27.2 / macOS SDK 27.2 |
-| Focused checks | Layout and language persistence, native preference transactions, profiles and undo, hidden-only reveal and recovery, spacer content/lifetime, single-row views and horizontal input, image handling, navigation, spacing, and event-monitor cancellation |
+| Focused checks | Layout and language persistence, native preference transactions, profiles and undo, hidden-only reveal and recovery, mixed icon/spacer order and anchors, spacer content/lifetime, single-row views and horizontal input, image handling, navigation, spacing, and event-monitor cancellation |
 | Runtime checks | Live language switching, sidebar selection, preference restoration, and reaching the right end of an overflowing strip verified; see limits below |
 
 The original Ice Bar has not been ported to macOS 27's MenuBarAgent. Exact

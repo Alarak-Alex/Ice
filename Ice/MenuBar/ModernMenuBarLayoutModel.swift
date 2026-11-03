@@ -27,6 +27,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     private var authorizedURL: URL?
     private var visibilityAuthorizedURL: URL?
     private var visibility = [String: Bool]()
+    private var nativePositions = [String: Double]()
     private var previousPositions: [String: Double]?
     private var writtenPositions: [String: Double]?
     private var previousSections: [String: MenuBarLayoutSection]?
@@ -182,6 +183,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
                     }
                 } catch { errorMessage = error.localizedDescription }
             }
+            nativePositions = positions ?? [:]
             entries = result
             itemImages = appState != nil ? imageStore.images(for: result) : [:]
             if shouldCaptureImages, appState != nil, !isApplying, !isCapturingImages {
@@ -393,7 +395,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
 
     @discardableResult
     private func applyLayout(source: Entry, target: Entry? = nil, after: Bool = false,
-                             section: MenuBarLayoutSection? = nil, placement: MenuBarNewItemPlacement? = nil) async -> Bool {
+                             section: MenuBarLayoutSection? = nil, layout: MenuBarLayoutProfile? = nil) async -> Bool {
         guard !isBusy, canEdit, let sourceKey = source.positionKey, hideHiddenItems() else { return false }
         isApplying = true
         errorMessage = nil
@@ -405,7 +407,9 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         do {
             let positions = try store.positions()
             original = positions
-            let discoveredOrder = entries.compactMap(\.positionKey)
+            let discoveredOrder = (entries.compactMap(\.positionKey) +
+                (activeProfile?.spacers.map { MenuBarSpacerManager.positionKey(for: $0.id) } ?? []))
+                .filter { positions[$0] != nil }
             let orderIndex = Dictionary(uniqueKeysWithValues: discoveredOrder.enumerated().map { ($1, $0) })
             let keys = discoveredOrder.sorted {
                 let left = positions[$0, default: 0]
@@ -428,7 +432,19 @@ final class ModernMenuBarLayoutModel: ObservableObject {
                 approval = allowed
                 sections[source.bundleID] = section
             }
-            let changesPlacement = placement.map { $0 != activeProfile?.newItemPlacement } ?? false
+            var plannedLayout = layout
+            if plannedLayout == nil, target != nil || changesSection {
+                let destinationSection = section ?? self.section(for: source)
+                let destination = displayEntries(in: destinationSection).filter { $0.id != source.id }
+                var beforeID = target?.id
+                if after, let targetIndex = destination.firstIndex(where: { $0.id == beforeID }) {
+                    beforeID = destination.dropFirst(targetIndex + 1).first?.id
+                }
+                plannedLayout = layoutAfterDrop(source.id, in: destinationSection, before: beforeID)
+            }
+            let changesPlacement = plannedLayout.map {
+                $0.spacers != activeProfile?.spacers || $0.newItemPlacement != activeProfile?.newItemPlacement
+            } ?? false
             guard positions != updated || changesSection || changesPlacement else { return true }
             if positions != updated {
                 try store.save(updated, replacing: positions)
@@ -448,12 +464,13 @@ final class ModernMenuBarLayoutModel: ObservableObject {
             writtenVisibility = visibilityChange.map { [source.bundleID: $0.after] } ?? [:]
             canUndo = true
             notice = AppLanguage.localized("Menu bar layout updated.")
-            if let placement, let index = profiles.firstIndex(where: { $0.id == activeProfileID }) {
-                profiles[index].newItemPlacement = placement
+            if let plannedLayout, let index = profiles.firstIndex(where: { $0.id == activeProfileID }) {
+                profiles[index].spacers = plannedLayout.spacers
+                profiles[index].newItemPlacement = plannedLayout.newItemPlacement
             }
             updateActiveProfile(positions: updated, sections: sections)
             await refresh()
-            if let target, positions != updated {
+            if let target, !target.isSpacer, positions != updated {
                 orderVerificationTask = Task { [weak self] in
                     guard let self else { return }
                     let applied = await verifyOrder(source: source, target: target, after: after)
@@ -571,6 +588,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
 
     func displayEntries(in section: MenuBarLayoutSection) -> [Entry] {
         var result = entries(in: section)
+        var pending = [(Entry, String?)]()
         for spacer in activeProfile?.spacers.filter({ $0.section == section }) ?? [] {
             let id = "spacer:\(spacer.id.uuidString)"
             let entry = Entry(
@@ -579,11 +597,26 @@ final class ModernMenuBarLayoutModel: ObservableObject {
                 pid: getpid(), frame: .zero, positionKey: MenuBarSpacerManager.positionKey(for: spacer.id), identifier: id, nativeTitle: "",
                 isVisible: spacer.section == .visible, spacer: spacer
             )
-            if let beforeID = spacer.beforeID, let index = result.firstIndex(where: { $0.id == beforeID }) {
-                result.insert(entry, at: index)
-            } else {
+            if nativePositions[entry.positionKey ?? ""] != nil {
                 result.append(entry)
+            } else {
+                pending.append((entry, spacer.beforeID))
             }
+        }
+        let orderIndex = Dictionary(uniqueKeysWithValues: result.enumerated().map { ($1.id, $0) })
+        result.sort {
+            let left = nativePositions[$0.positionKey ?? "", default: 0]
+            let right = nativePositions[$1.positionKey ?? "", default: 0]
+            return left == right ? orderIndex[$0.id, default: 0] < orderIndex[$1.id, default: 0] : left > right
+        }
+        // Unregistered hidden spacers still need their saved anchors, including spacer chains.
+        while !pending.isEmpty {
+            let next = pending.firstIndex { _, beforeID in
+                beforeID == nil || result.contains(where: { $0.id == beforeID })
+            } ?? 0
+            let (entry, beforeID) = pending.remove(at: next)
+            let index = beforeID.flatMap { id in result.firstIndex(where: { $0.id == id }) } ?? result.endIndex
+            result.insert(entry, at: index)
         }
         if let placement = activeProfile?.newItemPlacement, placement.section == section {
             let marker = Entry(id: Entry.insertionMarkerID, name: AppLanguage.localized("New Items\nhere"),
@@ -620,7 +653,9 @@ final class ModernMenuBarLayoutModel: ObservableObject {
                 previousActiveProfileID = activeProfileID
                 previousVisibility = [:]
                 writtenVisibility = [:]
-                profiles[index].newItemPlacement = MenuBarNewItemPlacement(section: section, beforeID: targetID)
+                if let layout = layoutAfterDrop(sourceID, in: section, before: targetID) {
+                    profiles[index] = layout
+                }
                 saveProfiles()
                 canUndo = true
                 notice = AppLanguage.localized("Menu bar layout updated.")
@@ -632,27 +667,46 @@ final class ModernMenuBarLayoutModel: ObservableObject {
             return
         }
         guard let source = entries.first(where: { $0.id == sourceID }) else { return }
-        let placement = placementAfterDrop(sourceID, in: section, before: targetID)
-        if let targetID, let index = destination.firstIndex(where: { $0.id == targetID }),
-           let target = destination.dropFirst(index).first(where: { !$0.isSpacer && !$0.isInsertionMarker && $0.id != sourceID }) {
-            await applyLayout(source: source, target: target, section: section, placement: placement)
-        } else {
-            let target = destination.last { !$0.isSpacer && !$0.isInsertionMarker && $0.id != sourceID }
-            await applyLayout(source: source, target: target, after: true, section: section, placement: placement)
+        let layout = layoutAfterDrop(sourceID, in: section, before: targetID)
+        do {
+            let positions = try store.positions()
+            let isNativeTarget: (Entry) -> Bool = {
+                $0.id != sourceID && $0.positionKey.map { positions[$0] != nil } == true
+            }
+            if let targetID, let index = destination.firstIndex(where: { $0.id == targetID }),
+               let target = destination.dropFirst(index).first(where: isNativeTarget) {
+                await applyLayout(source: source, target: target, section: section, layout: layout)
+            } else {
+                let target = destination.last(where: isNativeTarget)
+                await applyLayout(source: source, target: target, after: true, section: section, layout: layout)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
-    private func placementAfterDrop(_ sourceID: String, in section: MenuBarLayoutSection, before targetID: String?) -> MenuBarNewItemPlacement? {
-        guard var placement = activeProfile?.newItemPlacement else { return nil }
-        var ids = displayEntries(in: placement.section).map(\.id).filter { $0 != sourceID }
-        if placement.section == section {
-            let index = targetID.flatMap { ids.firstIndex(of: $0) } ?? ids.endIndex
-            ids.insert(sourceID, at: index)
+    private func layoutAfterDrop(_ sourceID: String, in section: MenuBarLayoutSection, before targetID: String?) -> MenuBarLayoutProfile? {
+        guard var profile = activeProfile else { return nil }
+        if sourceID == Entry.insertionMarkerID { profile.newItemPlacement.section = section }
+        if let index = profile.spacers.firstIndex(where: { "spacer:\($0.id.uuidString)" == sourceID }) {
+            profile.spacers[index].section = section
         }
-        if let marker = ids.firstIndex(of: Entry.insertionMarkerID) {
-            placement.beforeID = ids.dropFirst(marker + 1).first
+        for area in MenuBarLayoutSection.allCases {
+            var ids = displayEntries(in: area).map(\.id).filter { $0 != sourceID }
+            if area == section {
+                let index = targetID.flatMap { ids.firstIndex(of: $0) } ?? ids.endIndex
+                ids.insert(sourceID, at: index)
+            }
+            for index in profile.spacers.indices where profile.spacers[index].section == area {
+                if let offset = ids.firstIndex(of: "spacer:\(profile.spacers[index].id.uuidString)") {
+                    profile.spacers[index].beforeID = ids.dropFirst(offset + 1).first { $0 != Entry.insertionMarkerID }
+                }
+            }
+            if profile.newItemPlacement.section == area, let marker = ids.firstIndex(of: Entry.insertionMarkerID) {
+                profile.newItemPlacement.beforeID = ids.dropFirst(marker + 1).first
+            }
         }
-        return placement
+        return profile
     }
 
     private func addSpacer(sourceID: String, in section: MenuBarLayoutSection, before targetID: String?) async {
@@ -671,20 +725,17 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         do {
             original = try store.positions()
             let spacerID: UUID
-            let anchor = targetID == Entry.insertionMarkerID ? activeProfile?.newItemPlacement.beforeID : targetID
             if let index = profiles[profileIndex].spacers.firstIndex(where: { "spacer:\($0.id.uuidString)" == sourceID }) {
-                let placement = placementAfterDrop(sourceID, in: section, before: targetID)
-                profiles[profileIndex].spacers[index].section = section
-                profiles[profileIndex].spacers[index].beforeID = anchor
                 spacerID = profiles[profileIndex].spacers[index].id
-                if let placement { profiles[profileIndex].newItemPlacement = placement }
             } else {
-                let spacer = MenuBarLayoutSpacer(section: section, beforeID: anchor)
+                let spacer = MenuBarLayoutSpacer(section: section)
                 spacerID = spacer.id
-                let placement = placementAfterDrop("spacer:\(spacerID.uuidString)", in: section, before: targetID)
                 profiles[profileIndex].spacers.append(spacer)
-                if let placement { profiles[profileIndex].newItemPlacement = placement }
             }
+            if let layout = layoutAfterDrop("spacer:\(spacerID.uuidString)", in: section, before: targetID) {
+                profiles[profileIndex] = layout
+            }
+            let anchor = profiles[profileIndex].spacers.first(where: { $0.id == spacerID })?.beforeID
             spacerManager.synchronize(activeProfile?.spacers ?? [])
             let sourceKey = MenuBarSpacerManager.positionKey(for: spacerID)
             let current = try await registeredSpacerPositions(activeProfile?.spacers ?? [])

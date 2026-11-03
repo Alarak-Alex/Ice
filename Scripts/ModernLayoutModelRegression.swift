@@ -99,6 +99,7 @@ struct ModernLayoutModelRegression {
         assert(nativeSpacers.items[nativeSpacer.id]?.button?.image != nil,
                "Removing a spacer must also discard cached render state before recreating its host")
         nativeSpacers.synchronize([])
+        try await checkMixedOrdering(root: root, suite: suite)
         let keys = (1...3).map { "status:com.example.\($0)::Item-0" }
         let initial = Dictionary(uniqueKeysWithValues: zip(keys, [300.0, 200.0, 100.0]))
         let positionURL = root.appendingPathComponent("positions.plist")
@@ -517,5 +518,98 @@ struct ModernLayoutModelRegression {
         print("Temporary reveal: Hidden only, unchanged Always Hidden, idempotence, authored layout preservation, restoration and edit cleanup passed")
         print("Spacer content: legacy decoding, text/symbol persistence, invalid symbol rejection, stable anchors and profile copy/undo passed")
         print("Native spacers: blank/text/symbol rendering, stable identity, cached images, fallback content, resizing and removal passed")
+    }
+
+    @MainActor private static func checkMixedOrdering(root: URL, suite: String) async throws {
+        let defaults = UserDefaults(suiteName: suite + ".mixed")!
+        defer { defaults.removePersistentDomain(forName: suite + ".mixed") }
+        let keys = (1...3).map { "status:com.example.mixed\($0)::Item-0" }
+        let unrelated = "module:Unrelated"
+        let positionURL = root.appendingPathComponent("mixed-order.plist")
+        let visibilityURL = root.appendingPathComponent("mixed-visibility.plist")
+        let store = MenuBarPositionStore(url: positionURL, backupURL: root.appendingPathComponent("mixed-order.before.plist"))
+        let visibility = MenuBarVisibilityStore(url: visibilityURL, backupURL: root.appendingPathComponent("mixed-visibility.before.plist"))
+        let records = (1...3).map { ["location": ["bundle": ["_0": "com.example.mixed\($0)"]], "isAllowed": true] as [String: Any] }
+        let tracked = try PropertyListSerialization.data(fromPropertyList: records, format: .binary, options: 0)
+        try PropertyListSerialization.data(fromPropertyList: ["trackedApplications": tracked], format: .binary, options: 0).write(to: visibilityURL)
+        func makeModel(_ profile: MenuBarLayoutProfile, positions: [String: Double]) async throws -> ModernMenuBarLayoutModel {
+            try PropertyListSerialization.data(fromPropertyList: ["TrailingItemPreferredPositions": positions], format: .binary, options: 0).write(to: positionURL)
+            defaults.set(try JSONEncoder().encode([profile]), forKey: "MenuBarLayoutProfiles.v1")
+            defaults.set(profile.id.uuidString, forKey: "MenuBarLayoutActiveProfile.v1")
+            let model = ModernMenuBarLayoutModel(defaults: defaults, positionStore: store, visibilityStore: visibility,
+                                                spacerManager: FixtureSpacers(positions: store)) { _, positions, _, _ in
+                keys.enumerated().map { index, key in
+                    ModernMenuBarEntry(id: key, name: key, bundleID: "com.example.mixed\(index + 1)", pid: -1,
+                                      frame: .null, positionKey: key, identifier: "Item-0", nativeTitle: "", isVisible: false)
+                }.sorted { positions[$0.id]! > positions[$1.id]! }
+            }
+            await model.refresh()
+            return model
+        }
+        for count in 1...2 {
+            var spacers = (0..<count).map { _ in MenuBarLayoutSpacer(section: .visible, beforeID: keys[1]) }
+            if count == 2 { spacers[0].beforeID = "spacer:\(spacers[1].id.uuidString)" }
+            let spacerIDs = spacers.map { "spacer:\($0.id.uuidString)" }
+            let spacerKeys = spacers.map { MenuBarSpacerManager.positionKey(for: $0.id) }
+            let ids = [keys[0]] + spacerIDs + Array(keys.dropFirst())
+            let nativeKeys = [keys[0]] + spacerKeys + Array(keys.dropFirst())
+            var initial = Dictionary(uniqueKeysWithValues: nativeKeys.enumerated().map { ($1, Double(600 - $0 * 100)) })
+            initial[unrelated] = 725
+            let profile = MenuBarLayoutProfile(name: "Mixed", positions: initial, spacers: spacers)
+            for source in ids {
+                for target in ids.map(Optional.some) + [nil] where source != target {
+                    let model = try await makeModel(profile, positions: initial)
+                    let originalProfiles = model.profiles
+                    assert(model.displayEntries(in: .visible).map(\.id) == ids, "Spacer chains must retain their saved order")
+                    var expected = ids.filter { $0 != source }
+                    expected.insert(source, at: target.flatMap { expected.firstIndex(of: $0) } ?? expected.endIndex)
+                    await model.drop(source, in: .visible, before: target)
+                    let native = try store.positions()
+                    let nativeIDs = zip(ids, nativeKeys).sorted { native[$0.1]! > native[$1.1]! }.map(\.0)
+                    assert(model.errorMessage == nil)
+                    assert(nativeIDs == expected, "Mixed native order differs for \(source) before \(target ?? "end")")
+                    assert(model.displayEntries(in: .visible).map(\.id) == expected,
+                           "Editor order must agree with the native icon/spacer order")
+                    assert(native[unrelated] == initial[unrelated], "Mixed sorting must preserve unrelated native positions")
+                    if model.canUndo { await model.undo() }
+                    let restored = try store.positions()
+                    assert(restored == initial)
+                    assert(model.profiles == originalProfiles, "Undo must restore spacer anchors and placement metadata")
+                    let approvals = try visibility.approvals()
+                    assert(approvals.values.allSatisfy { $0 }, "Same-section sorting must preserve visibility")
+                }
+            }
+            let model = try await makeModel(profile, positions: initial)
+            let external = try MenuBarPositionStore.reordered(initial, keys: nativeKeys, moving: keys[2], before: spacerKeys[0])
+            try store.save(external, replacing: initial)
+            await model.refresh(captureImages: false)
+            assert(model.displayEntries(in: .visible).map(\.id) == [keys[0], keys[2]] + spacerIDs + [keys[1]],
+                   "Refresh must show externally authored native order instead of stale spacer anchors")
+
+            var hiddenProfile = profile
+            hiddenProfile.sections["com.example.mixed2"] = .hidden
+            for index in hiddenProfile.spacers.indices { hiddenProfile.spacers[index].section = .hidden }
+            let hiddenPositions = initial.filter { !spacerKeys.contains($0.key) }
+            hiddenProfile.positions = hiddenPositions
+            try visibility.setAllowed(false, for: "com.example.mixed2", replacing: true)
+            let hiddenModel = try await makeModel(hiddenProfile, positions: hiddenPositions)
+            let marker = ModernMenuBarEntry.insertionMarkerID
+            assert(hiddenModel.displayEntries(in: .hidden).map(\.id) == spacerIDs + [keys[1], marker])
+            let originalHiddenProfile = hiddenModel.profiles
+            await hiddenModel.drop(keys[2], in: .hidden, before: spacerIDs.last)
+            var expected = spacerIDs + [keys[1], marker]
+            expected.insert(keys[2], at: count - 1)
+            assert(hiddenModel.errorMessage == nil && hiddenModel.displayEntries(in: .hidden).map(\.id) == expected,
+                   "Unregistered hidden spacer targets must retain their position around a cross-section drop")
+            await hiddenModel.undo()
+            assert(hiddenModel.profiles == originalHiddenProfile)
+            await hiddenModel.drop(keys[1], in: .visible, before: nil)
+            assert(hiddenModel.displayEntries(in: .hidden).map(\.id) == spacerIDs + [marker],
+                   "Moving an anchor out of its section must preserve the remaining spacer chain")
+            await hiddenModel.undo()
+            assert(hiddenModel.profiles == originalHiddenProfile)
+            try visibility.setAllowed(true, for: "com.example.mixed2", replacing: false)
+        }
+        print("Mixed ordering: every icon/spacer destination, chains, end insertion, external order, unregistered hidden targets, cross-section anchors, unrelated positions and undo passed")
     }
 }
