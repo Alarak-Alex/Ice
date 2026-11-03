@@ -14,7 +14,7 @@ Ice 是一款开源的 macOS 菜单栏管理工具。本仓库是
 
 ![横幅](https://github.com/user-attachments/assets/4423085c-4e4b-4f3d-ad0f-90a217c03470)
 
-[![开发分支](https://img.shields.io/badge/branch-macos--27--build-brightgreen?style=flat-square)](https://github.com/Alarak-Alex/Ice/tree/macos-27-build)
+[![开发分支](https://img.shields.io/badge/branch-main-brightgreen?style=flat-square)](https://github.com/Alarak-Alex/Ice/tree/main)
 ![平台](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
 ![系统要求](https://img.shields.io/badge/requirements-macOS%2014%2B-fa4e49?style=flat-square)
 [![赞助原作者](https://img.shields.io/badge/Sponsor%20%E2%9D%A4%EF%B8%8F-8A2BE2?style=flat-square)](https://github.com/sponsors/jordanbaird)
@@ -22,7 +22,7 @@ Ice 是一款开源的 macOS 菜单栏管理工具。本仓库是
 [![许可证](https://img.shields.io/github/license/Alarak-Alex/Ice?style=flat-square)](LICENSE)
 
 > [!NOTE]
-> 本分支仍在开发，当前开发分支为 `macos-27-build`。macOS 27 的布局和可见性功能
+> 本分支仍在开发，当前开发分支为 `main`。macOS 27 的布局和可见性功能
 > 属于实验阶段，验证范围见下文。上游发行包和 Homebrew 安装的是原版 Ice，
 > 不包含本仓库的改动。
 
@@ -82,7 +82,7 @@ CPU 改善**。
 ### 构建本分支
 
 ```sh
-git clone --branch macos-27-build https://github.com/Alarak-Alex/Ice.git
+git clone --branch main https://github.com/Alarak-Alex/Ice.git
 cd Ice
 open Ice.xcodeproj
 ```

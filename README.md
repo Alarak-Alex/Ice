@@ -15,7 +15,7 @@ for macOS 27.
 
 ![Banner](https://github.com/user-attachments/assets/4423085c-4e4b-4f3d-ad0f-90a217c03470)
 
-[![Development branch](https://img.shields.io/badge/branch-macos--27--build-brightgreen?style=flat-square)](https://github.com/Alarak-Alex/Ice/tree/macos-27-build)
+[![Development branch](https://img.shields.io/badge/branch-main-brightgreen?style=flat-square)](https://github.com/Alarak-Alex/Ice/tree/main)
 ![Platform](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
 ![Requirements](https://img.shields.io/badge/requirements-macOS%2014%2B-fa4e49?style=flat-square)
 [![Sponsor](https://img.shields.io/badge/Sponsor%20%E2%9D%A4%EF%B8%8F-8A2BE2?style=flat-square)](https://github.com/sponsors/jordanbaird)
@@ -23,7 +23,7 @@ for macOS 27.
 [![License](https://img.shields.io/github/license/Alarak-Alex/Ice?style=flat-square)](LICENSE)
 
 > [!NOTE]
-> This fork is under development on `macos-27-build`. The macOS 27 layout and
+> This fork is under development on `main`. The macOS 27 layout and
 > visibility features are experimental; see the validation limits below.
 > Upstream releases and the Homebrew cask install the original Ice, without
 > this fork's changes.
@@ -95,7 +95,7 @@ controlled overall CPU improvement.
 ### Build this fork
 
 ```sh
-git clone --branch macos-27-build https://github.com/Alarak-Alex/Ice.git
+git clone --branch main https://github.com/Alarak-Alex/Ice.git
 cd Ice
 open Ice.xcodeproj
 ```
