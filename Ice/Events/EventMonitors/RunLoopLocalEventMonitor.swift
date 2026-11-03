@@ -6,10 +6,10 @@
 import Cocoa
 import Combine
 
+/// Observes native tracking events without removing them from AppKit's queue.
 final class RunLoopLocalEventMonitor {
     private let runLoop = CFRunLoopGetCurrent()
     private let mode: RunLoop.Mode
-    private let handler: (NSEvent) -> NSEvent?
     private let observer: CFRunLoopObserver
 
     /// Creates an event monitor with the given event type mask and handler.
@@ -21,37 +21,26 @@ final class RunLoopLocalEventMonitor {
     init(
         mask: NSEvent.EventTypeMask,
         mode: RunLoop.Mode,
-        handler: @escaping (_ event: NSEvent) -> NSEvent?
+        handler: @escaping (_ event: NSEvent) -> Void
     ) {
         self.mode = mode
-        self.handler = handler
+        var lastEvent: (NSEvent.EventType, TimeInterval, Int, NSEvent.ModifierFlags)?
         self.observer = CFRunLoopObserverCreateWithHandler(
             kCFAllocatorDefault,
             CFRunLoopActivity.beforeSources.rawValue,
             true,
             0
         ) { _, _ in
-            var events = [NSEvent]()
-
-            while let event = NSApp.nextEvent(matching: .any, until: nil, inMode: .default, dequeue: true) {
-                events.append(event)
+            // Reposting wakes nested tracking loops before the control can consume its event.
+            guard let event = NSApp.nextEvent(matching: mask, until: .distantPast, inMode: mode, dequeue: false) else {
+                lastEvent = nil
+                return
             }
-
-            for event in events {
-                var handledEvent: NSEvent?
-
-                if !mask.contains(NSEvent.EventTypeMask(rawValue: 1 << event.type.rawValue)) {
-                    handledEvent = event
-                } else if let eventFromHandler = handler(event) {
-                    handledEvent = eventFromHandler
-                }
-
-                guard let handledEvent else {
-                    continue
-                }
-
-                NSApp.postEvent(handledEvent, atStart: false)
-            }
+            // Peeking can return a new NSEvent wrapper for the same queued event.
+            let identity = (event.type, event.timestamp, event.windowNumber, event.modifierFlags)
+            if let lastEvent, lastEvent == identity { return }
+            lastEvent = identity
+            handler(event)
         }
     }
 
@@ -101,15 +90,17 @@ extension RunLoopLocalEventMonitor {
 
 extension RunLoopLocalEventMonitor.RunLoopLocalEventPublisher {
     private final class RunLoopLocalEventSubscription<S: Subscriber<Output, Failure>>: Subscription {
-        var subscriber: S?
-        let monitor: RunLoopLocalEventMonitor
+        private let mask: NSEvent.EventTypeMask
+        private let mode: RunLoop.Mode
+        private var subscriber: S?
+        private lazy var monitor = RunLoopLocalEventMonitor(mask: mask, mode: mode) { [weak self] event in
+            _ = self?.subscriber?.receive(event)
+        }
 
         init(mask: NSEvent.EventTypeMask, mode: RunLoop.Mode, subscriber: S) {
+            self.mask = mask
+            self.mode = mode
             self.subscriber = subscriber
-            self.monitor = RunLoopLocalEventMonitor(mask: mask, mode: mode) { event in
-                _ = subscriber.receive(event)
-                return event
-            }
             monitor.start()
         }
 

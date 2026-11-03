@@ -1,5 +1,6 @@
 // Compile with ModernMenuBarCollection, ModernMenuBarDiscovery, identity resolver and AppLanguage.
 import Cocoa
+import SwiftUI
 
 @main
 struct ModernLayoutViewRegression {
@@ -44,6 +45,66 @@ struct ModernLayoutViewRegression {
                               pid: -1, frame: .zero, positionKey: "status:com.example.\(index)::Item-0",
                               identifier: "Item-0", nativeTitle: "", isVisible: true)
         }
+        let host = NSHostingView(rootView: ModernMenuBarCollection(
+            entries: entries, images: [:], showAppIcons: false, isEditable: true, emptyPlaceholder: nil,
+            onDrop: { _, _ in assertionFailure("Browsing must not reorder menu bar items") },
+            onSpacerWidthChanged: { _, _ in }, onRemoveSpacer: { _ in }
+        ))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 76),
+                              styleMask: [], backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: .now.addingTimeInterval(0.1))
+        func findScrollView(in view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.documentView is MenuBarLayoutItemStrip { return scroll }
+            return view.subviews.lazy.compactMap { findScrollView(in: $0) }.first
+        }
+        let scroll = findScrollView(in: host)!
+        scroll.layoutSubtreeIfNeeded()
+        let scrollingStrip = scroll.documentView as! MenuBarLayoutItemStrip
+        let maximumOffset = scrollingStrip.bounds.width - scroll.contentSize.width
+        assert(maximumOffset > 0, "Overflowing items need a horizontally scrollable document")
+        func backgroundMouse(_ type: NSEvent.EventType, x: CGFloat) -> NSEvent {
+            let location = scroll.convert(NSPoint(x: x, y: 4), to: nil)
+            return NSEvent.mouseEvent(with: type, location: location, modifierFlags: [],
+                                      timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                      eventNumber: 0, clickCount: 1, pressure: 0)!
+        }
+        scrollingStrip.mouseDown(with: backgroundMouse(.leftMouseDown, x: 250))
+        scrollingStrip.mouseDragged(with: backgroundMouse(.leftMouseDragged, x: 100))
+        assert(scroll.contentView.bounds.minX == 150, "Dragging empty bar space left must reveal items on the right")
+        scrollingStrip.mouseUp(with: backgroundMouse(.leftMouseUp, x: 100))
+        assert(!scrollingStrip.itemViews.contains(where: \.isDragging), "Panning must not start an item drag session")
+        assert(scroll.hasHorizontalScroller, "Overflow must expose a native horizontal scroller")
+        assert(Set(scrollingStrip.itemViews.map { $0.frame.midY }).count == 1
+               && scroll.contentView.bounds.height >= 40,
+               "Both system scroller styles must retain one complete row of icons")
+        func wheel(_ x: Int32, _ y: Int32, units: CGScrollEventUnit) -> NSEvent {
+            NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: units,
+                                    wheelCount: 2, wheel1: y, wheel2: x, wheel3: 0)!)!
+        }
+        scroll.scrollWheel(with: wheel(0, -3, units: .line))
+        assert(scroll.contentView.bounds.minX > 150, "A mouse wheel must browse an overflowing horizontal strip")
+        let afterWheel = scroll.contentView.bounds.minX
+        scroll.scrollWheel(with: wheel(-80, 0, units: .pixel))
+        assert(scroll.contentView.bounds.minX > afterWheel, "Trackpad horizontal deltas must remain native")
+        scrollingStrip.mouseDown(with: backgroundMouse(.leftMouseDown, x: 250))
+        scrollingStrip.mouseDragged(with: backgroundMouse(.leftMouseDragged, x: -5000))
+        scrollingStrip.mouseUp(with: backgroundMouse(.leftMouseUp, x: -5000))
+        assert(scroll.contentView.bounds.minX == maximumOffset)
+        assert(scroll.documentVisibleRect.contains(scrollingStrip.itemViews.last!.frame),
+               "The final item must be reachable rather than permanently clipped")
+        scrollingStrip.update(entries: entries, images: [:])
+        scroll.layoutSubtreeIfNeeded()
+        assert(scroll.contentView.bounds.minX == maximumOffset, "A refresh must preserve the browsing position")
+        assert(scrollingStrip.itemViews.last!.accessibilityPerformPress() && scrollingStrip.itemViews.last!.isSelected)
+        scrollingStrip.mouseDown(with: backgroundMouse(.leftMouseDown, x: 100))
+        scrollingStrip.mouseDragged(with: backgroundMouse(.leftMouseDragged, x: 5000))
+        scrollingStrip.mouseUp(with: backgroundMouse(.leftMouseUp, x: 5000))
+        assert(scroll.contentView.bounds.minX == 0, "Dragging right must return to the first item without overshooting")
+        scrollingStrip.mouseDragged(with: backgroundMouse(.leftMouseDragged, x: -100))
+        assert(scroll.contentView.bounds.minX == 0, "A stray drag after mouse-up must not keep panning")
+
         let strip = MenuBarLayoutItemStrip(frame: NSRect(x: 0, y: 0, width: 300, height: 72))
         strip.isEditable = true
         strip.update(entries: entries, images: [:])
@@ -89,6 +150,7 @@ struct ModernLayoutViewRegression {
         assert(markerView.menu(for: backgroundEvent) == nil, "The marker must not expose spacer deletion or width controls")
         assert(strip.itemViews.filter(\.isInsertionMarker).count == 1)
         print("Modern layout: fallback icons, app badges, hit testing, selection accessibility, single row, stable views and background drag rejection passed")
+        print("Horizontal browsing: empty-space panning, mouse wheel, trackpad, both edges, last-item selection and refresh offset passed")
         print("Insertion marker: one row, fixed geometry, bilingual two-line rendering, label hit testing, selection and distinct spacer behavior passed")
     }
 }

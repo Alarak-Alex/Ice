@@ -73,6 +73,9 @@ final class MenuBarSection {
 
     /// A Boolean value that indicates whether the section is hidden.
     var isHidden: Bool {
+        if #available(macOS 27.0, *), name != .alwaysHidden, let appState {
+            return !appState.modernMenuBarLayout.areHiddenItemsRevealed
+        }
         if useIceBar {
             if controlItem.state == .showItems {
                 return false
@@ -135,6 +138,12 @@ final class MenuBarSection {
         else {
             return
         }
+        if #available(macOS 27.0, *), name != .alwaysHidden {
+            if appState.modernMenuBarLayout.showHiddenItems() {
+                appState.menuBarManager.section(withName: .hidden)?.startRehideChecks()
+            }
+            return
+        }
         guard controlItem.isAddedToMenuBar else {
             // The section is disabled.
             // TODO: Can we use isEnabled for this check?
@@ -194,6 +203,15 @@ final class MenuBarSection {
             let appState,
             !isHidden
         else {
+            return
+        }
+        if #available(macOS 27.0, *), name != .alwaysHidden {
+            if appState.modernMenuBarLayout.hideHiddenItems() {
+                appState.allowShowOnHover()
+                for section in appState.menuBarManager.sections where section.name != .alwaysHidden {
+                    section.stopRehideChecks()
+                }
+            }
             return
         }
         iceBarPanel?.close()

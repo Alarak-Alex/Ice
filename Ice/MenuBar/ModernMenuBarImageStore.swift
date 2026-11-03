@@ -46,9 +46,9 @@ final class ModernMenuBarImageStore {
                   let source = CGImageSourceCreateWithURL(directory.appendingPathComponent(ModernMenuBarItemImages.fileName(for: entry.id)) as CFURL, nil),
                   let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
             let value = NSImage(cgImage: image, size: CGSize(width: CGFloat(image.width) / metadata.scale, height: CGFloat(image.height) / metadata.scale))
-            loaded[entry.id] = value
             result[entry.id] = value
         }
+        loaded = result
         return result
     }
 

@@ -3,39 +3,139 @@
     <h1>Ice</h1>
 </div>
 
-Ice is a powerful menu bar management tool. While its primary function is hiding and showing menu bar items, it aims to cover a wide variety of additional features to make it one of the most versatile menu bar tools available.
+<p align="center">
+    <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+Ice is an open-source menu bar manager for macOS. This is the
+[Alarak-Alex/Ice](https://github.com/Alarak-Alex/Ice) fork of
+[jordanbaird/Ice](https://github.com/jordanbaird/Ice), with updated settings,
+English and Simplified Chinese support, and a dedicated menu bar layout editor
+for macOS 27.
 
 ![Banner](https://github.com/user-attachments/assets/4423085c-4e4b-4f3d-ad0f-90a217c03470)
 
-[![Download](https://img.shields.io/badge/download-latest-brightgreen?style=flat-square)](https://github.com/jordanbaird/Ice/releases/latest)
+[![Development branch](https://img.shields.io/badge/branch-macos--27--build-brightgreen?style=flat-square)](https://github.com/Alarak-Alex/Ice/tree/macos-27-build)
 ![Platform](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
 ![Requirements](https://img.shields.io/badge/requirements-macOS%2014%2B-fa4e49?style=flat-square)
 [![Sponsor](https://img.shields.io/badge/Sponsor%20%E2%9D%A4%EF%B8%8F-8A2BE2?style=flat-square)](https://github.com/sponsors/jordanbaird)
 [![Website](https://img.shields.io/badge/Website-015FBA?style=flat-square)](https://icemenubar.app)
-[![License](https://img.shields.io/github/license/jordanbaird/Ice?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/github/license/Alarak-Alex/Ice?style=flat-square)](LICENSE)
 
 > [!NOTE]
-> Ice is currently in active development. Some features have not yet been implemented. Download the latest release [here](https://github.com/jordanbaird/Ice/releases/latest) and see the roadmap below for upcoming features.
+> This fork is under development on `macos-27-build`. The macOS 27 layout and
+> visibility features are experimental; see the validation limits below.
+> Upstream releases and the Homebrew cask install the original Ice, without
+> this fork's changes.
 
-<a href="https://www.buymeacoffee.com/jordanbaird" target="_blank">
-    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;">
-</a>
+## Changes in this fork
+
+The English and Chinese READMEs describe the same development stage, updated
+November 3, 2026.
+
+- **Settings and navigation:** native AppKit search and sidebar selection,
+  separate click targets, keyboard navigation, back/forward history, unified
+  toolbar, semantic colors, and compact grouped settings.
+- **Language selection:** choose System, English, or Simplified Chinese in
+  General. The interface switches immediately and remembers the selection.
+- **macOS 27 layout:** Accessibility discovery for MenuBarAgent-hosted items,
+  three single-row sections, configuration profiles, automatic display
+  assignment, and a draggable insertion marker for newly discovered apps.
+  Editor clicks select items without opening their application menus.
+- **Horizontal browsing:** use a horizontal trackpad gesture, a mouse wheel,
+  the native scrollbar, or drag the strip's empty background to reach overflow
+  items. Refresh preserves the browsing position; dragging an icon reorders it.
+- **Palette spacers:** persisted spacer widths of 1–200 points, native status
+  items with stable identities and explicit blank images, width editing,
+  removal, and rollback when native registration fails. Physical spacer
+  registration and drag/drop still need runtime acceptance.
+- **Hidden-item reveal on macOS 27:** blank-space clicks are routed to
+  temporarily reveal the Hidden section, excluding Always Hidden. Separate
+  recovery journals restore original visibility after image recapture or
+  temporary reveal, including interrupted sessions. Physical blank-click
+  behavior still needs runtime acceptance.
+- **Native preference handling:** guarded order and visibility writes,
+  stale-state detection, backups, file-access pickers, and undo.
+- **Images and spacing:** cropped menu bar glyphs with app-icon fallback,
+  recapture controls, and Default / Small / Tiny / None spacing. Logging out
+  and back in applies spacing to all status items.
+- **Performance and lifetime fixes:** tracking monitors observe the event queue
+  without draining and reposting it, pending events are deduplicated, cancelled
+  subscriptions release subscribers, and departed items leave the resident
+  image cache while remaining available on disk.
+- **Build and startup:** launch-at-login error feedback, vendored CompactSlider
+  compatibility fixes, and a signed local installation script.
+
+Implementation details and reproducible regression commands are in
+[FORK.md](FORK.md).
+
+## Compatibility and validation
+
+| Area | Current status |
+| --- | --- |
+| Minimum deployment target | macOS 14 |
+| macOS 14–26 | Original layout/hiding engine retained; macOS 26 runtime and appearance have not been verified |
+| macOS 27 | Separate layout editor and native order/visibility paths; signed Release build and installation verified locally |
+| Local toolchain | Xcode 27.2 / macOS SDK 27.2 |
+| Focused checks | Layout and language persistence, native preference transactions, profiles and undo, hidden-only reveal and recovery, spacer content/lifetime, single-row views and horizontal input, image handling, navigation, spacing, and event-monitor cancellation |
+| Runtime checks | Live language switching, sidebar selection, preference restoration, and reaching the right end of an overflowing strip verified; see limits below |
+
+The original Ice Bar has not been ported to macOS 27's MenuBarAgent. Exact
+Bartender visual parity, physical foreground dragging/panning, native spacer
+placement, physical blank-space reveal, multiple-display behavior, and macOS 26
+runtime parity remain unverified.
+
+Performance samples no longer show the former tracking-loop hotspot. Local
+leak snapshots still report allocations without conclusive ownership stacks;
+this stage does **not** establish zero leaks, long-term memory stability, or a
+controlled overall CPU improvement.
 
 ## Install
 
-### Manual Installation
+### Build this fork
 
-Download the "Ice.zip" file from the [latest release](https://github.com/jordanbaird/Ice/releases/latest) and move the unzipped app into your `Applications` folder.
+```sh
+git clone --branch macos-27-build https://github.com/Alarak-Alex/Ice.git
+cd Ice
+open Ice.xcodeproj
+```
 
-### Homebrew
+Select the Ice scheme, choose your signing team, and build with Xcode. To use
+the local Release installation script, supply your own installed signing
+identity and team:
 
-Install Ice using the following command:
+```sh
+SIGN_IDENTITY="Apple Development: Your Name (CERTIFICATE_ID)" \
+SIGN_TEAM="YOUR_TEAM_ID" \
+./Scripts/install-local.sh
+```
+
+The script installs `/Applications/Ice.app`, verifies its signature, and
+disables automatic Sparkle updates to prevent replacement by an upstream
+build. Keep the same bundle identifier and signing identity across rebuilds
+to preserve existing permission grants.
+
+Allow Accessibility in System Settings for menu bar management. Screen
+Recording is used to capture item images. If native preference access is
+unavailable, the layout editor provides file-access pickers.
+
+### Original upstream distribution
+
+Download `Ice.zip` from the
+[upstream releases](https://github.com/jordanbaird/Ice/releases/latest) and
+move the unzipped app into `Applications`, or install the upstream Homebrew cask:
 
 ```sh
 brew install --cask jordanbaird-ice
 ```
 
-## Features/Roadmap
+These distributions do not include the fork changes described above.
+
+## Original features and roadmap
+
+The following list describes the inherited feature set. On macOS 27, use the
+compatibility table above rather than assuming every legacy feature is ported.
+Experimental profiles and spacers added by this fork are described separately.
 
 ### Menu bar item management
 
@@ -50,8 +150,6 @@ brew install --cask jordanbaird-ice
 - [x] Display hidden menu bar items in a separate bar (e.g. for MacBooks with the notch)
 - [x] Search menu bar items
 - [x] Menu bar item spacing (BETA)
-- [ ] Profiles for menu bar layout
-- [ ] Individual spacer items
 - [ ] Menu bar item groups
 - [ ] Show menu bar items when trigger conditions are met
 
@@ -87,6 +185,8 @@ Ice uses a number of system APIs that are available starting in macOS 14. As suc
 
 ## Gallery
 
+These screenshots show the original upstream interface.
+
 #### Show hidden menu bar items below the menu bar
 
 ![Ice Bar](https://github.com/user-attachments/assets/f1429589-6186-4e1b-8aef-592219d49b9b)
@@ -110,3 +210,13 @@ Ice uses a number of system APIs that are available starting in macOS 14. As suc
 ## License
 
 Ice is available under the [GPL-3.0 license](LICENSE).
+
+The original Ice project is by Jordan Baird and its contributors. This fork's
+macOS 27 discovery and image work also references
+[Icey](https://github.com/leonardovida/icey), revision
+`0cb4b09cd401326adb19a15cdb4040235b70c924` (GPL-3.0). Bartender is a behavior
+and visual reference; its code and assets are not included.
+
+You can support the original author through
+[GitHub Sponsors](https://github.com/sponsors/jordanbaird) or
+[Buy Me a Coffee](https://www.buymeacoffee.com/jordanbaird).

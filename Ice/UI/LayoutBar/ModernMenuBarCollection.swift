@@ -24,9 +24,13 @@ struct ModernMenuBarCollection: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = MenuBarLayoutScrollView()
-        scroll.hasHorizontalScroller = false
+        scroll.hasHorizontalScroller = true
         scroll.hasVerticalScroller = false
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        scroll.horizontalLineScroll = 40
         scroll.drawsBackground = false
+        scroll.verticalScrollElasticity = .none
         scroll.horizontalScrollElasticity = .allowed
         scroll.documentView = MenuBarLayoutItemStrip()
         scroll.registerForDraggedTypes([MenuBarLayoutItemStrip.pasteboardType, MenuBarSpacerPaletteChip.pasteboardType])
@@ -47,6 +51,27 @@ struct ModernMenuBarCollection: NSViewRepresentable {
 }
 
 private final class MenuBarLayoutScrollView: NSScrollView {
+    func scrollHorizontally(to offset: CGFloat) {
+        let maximum = max(0, (documentView?.bounds.width ?? 0) - contentSize.width)
+        contentView.scroll(to: NSPoint(x: min(maximum, max(0, offset)), y: 0))
+        reflectScrolledClipView(contentView)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard let documentView, documentView.bounds.width > contentSize.width else {
+            super.scrollWheel(with: event)
+            return
+        }
+        if event.scrollingDeltaX != 0 {
+            let scale = event.hasPreciseScrollingDeltas ? 1 : horizontalLineScroll
+            scrollHorizontally(to: contentView.bounds.minX - event.scrollingDeltaX * scale)
+        } else if !event.hasPreciseScrollingDeltas {
+            scrollHorizontally(to: contentView.bounds.minX - event.scrollingDeltaY * horizontalLineScroll)
+        } else {
+            super.scrollWheel(with: event)
+        }
+    }
+
     override func layout() {
         super.layout()
         guard let strip = documentView as? MenuBarLayoutItemStrip else { return }
@@ -143,6 +168,7 @@ final class MenuBarLayoutItemStrip: NSView {
     private(set) var itemViews = [MenuBarLayoutItemView]()
     private var insertionIndex: Int? { didSet { needsDisplay = true } }
     private var selectedID: String?
+    private var panStart: (mouseX: CGFloat, offset: CGFloat)?
     var requiredWidth: CGFloat { itemViews.reduce(28) { $0 + $1.preferredWidth } }
     override var isFlipped: Bool { true }
 
@@ -158,6 +184,23 @@ final class MenuBarLayoutItemStrip: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let scroll = enclosingScrollView as? MenuBarLayoutScrollView else { return }
+        panStart = (scroll.convert(event.locationInWindow, from: nil).x, scroll.contentView.bounds.minX)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let panStart, let scroll = enclosingScrollView as? MenuBarLayoutScrollView else { return }
+        let mouseX = scroll.convert(event.locationInWindow, from: nil).x
+        scroll.scrollHorizontally(to: panStart.offset + panStart.mouseX - mouseX)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        panStart = nil
+    }
 
     func update(entries: [ModernMenuBarEntry], images: [String: NSImage]) {
         let previous = Dictionary(uniqueKeysWithValues: itemViews.map { ($0.entryID, $0) })

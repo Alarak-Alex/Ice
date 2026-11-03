@@ -16,15 +16,16 @@ struct MenuBarVisibilityStore {
 
     let url: URL
     let backupURL: URL
+    var temporaryVisibilityJournalName = "MenuBarImageCapture.visibility.plist"
 
     var temporaryVisibilityJournalURL: URL {
-        backupURL.deletingLastPathComponent().appendingPathComponent("MenuBarImageCapture.visibility.plist")
+        backupURL.deletingLastPathComponent().appendingPathComponent(temporaryVisibilityJournalName)
     }
 
-    @MainActor
-    func withTemporaryVisibility<T>(for bundleID: String, operation: () async throws -> T) async throws -> T {
+    @discardableResult
+    func beginTemporaryVisibility(for bundleID: String) throws -> Bool {
         guard let allowed = try approvals()[bundleID] else { throw Failure.unidentified }
-        if allowed { return try await operation() }
+        guard !allowed else { return false }
         var journal = try temporaryVisibilityJournal()
         journal[bundleID] = false
         try saveTemporaryVisibilityJournal(journal)
@@ -36,13 +37,19 @@ struct MenuBarVisibilityStore {
             }
             throw error
         }
+        return true
+    }
+
+    @MainActor
+    func withTemporaryVisibility<T>(for bundleID: String, operation: () async throws -> T) async throws -> T {
+        guard try beginTemporaryVisibility(for: bundleID) else { return try await operation() }
         let outcome: Result<T, Error>
         do { outcome = .success(try await operation()) }
         catch { outcome = .failure(error) }
         // A concurrent hide already restores the original state; never create a missing record.
         guard let current = try approvals()[bundleID] else { throw Failure.unidentified }
         if current { try setAllowed(false, for: bundleID, replacing: true) }
-        journal = try temporaryVisibilityJournal()
+        var journal = try temporaryVisibilityJournal()
         journal.removeValue(forKey: bundleID)
         try saveTemporaryVisibilityJournal(journal)
         return try outcome.get()

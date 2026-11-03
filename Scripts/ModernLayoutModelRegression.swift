@@ -43,6 +43,22 @@ struct ModernLayoutModelRegression {
         let suite = "com.jordanbaird.Ice.Regression.\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
+        let nativeSpacers = MenuBarSpacerManager()
+        var nativeSpacer = MenuBarLayoutSpacer(section: .visible)
+        nativeSpacers.synchronize([nativeSpacer])
+        let nativeItem = nativeSpacers.items[nativeSpacer.id]!
+        let nativeName = "Spacer-\(nativeSpacer.id.uuidString)"
+        assert(nativeItem.autosaveName == nativeName)
+        assert(nativeItem.button?.image?.size == NSSize(width: 16, height: 16),
+               "A spacer must supply an explicit blank image at its configured width")
+        assert(nativeItem.button?.identifier?.rawValue == nativeName)
+        assert(nativeItem.button?.imagePosition == .imageOnly && nativeItem.button?.title == "")
+        nativeSpacer.width = 48
+        nativeSpacers.synchronize([nativeSpacer])
+        assert(nativeSpacers.items[nativeSpacer.id] === nativeItem, "Resizing must retain native item identity")
+        assert(nativeItem.length == 48 && nativeItem.button?.image?.size.width == 48)
+        nativeSpacers.synchronize([])
+        assert(nativeSpacers.items.isEmpty)
         let keys = (1...3).map { "status:com.example.\($0)::Item-0" }
         let initial = Dictionary(uniqueKeysWithValues: zip(keys, [300.0, 200.0, 100.0]))
         let positionURL = root.appendingPathComponent("positions.plist")
@@ -70,6 +86,59 @@ struct ModernLayoutModelRegression {
         }
         await model.refresh()
         assert(model.canEdit && model.entries.count == 3)
+
+        let imageDirectory = root.appendingPathComponent("images")
+        try FileManager.default.createDirectory(at: imageDirectory, withIntermediateDirectories: true)
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 36, pixelsHigh: 36,
+                                       bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                       isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        let png = bitmap.representation(using: .png, properties: [:])!
+        for key in keys.prefix(2) {
+            try png.write(to: imageDirectory.appendingPathComponent(ModernMenuBarItemImages.fileName(for: key)))
+        }
+        try JSONSerialization.data(withJSONObject: [keys[0]: ["scale": 2], keys[1]: ["scale": 2]])
+            .write(to: imageDirectory.appendingPathComponent("index.json"))
+        let imageStore = ModernMenuBarImageStore(directory: imageDirectory)
+        weak var departedImage: NSImage?
+        weak var retainedImage: NSImage?
+        autoreleasepool {
+            let images = imageStore.images(for: Array(model.entries.prefix(2)))
+            departedImage = images[keys[0]]
+            retainedImage = images[keys[1]]
+            assert(departedImage != nil && retainedImage != nil)
+        }
+        autoreleasepool {
+            _ = imageStore.images(for: [model.entries[1]])
+        }
+        assert(departedImage == nil && retainedImage != nil,
+               "Images of departed items must leave the resident cache while current images stay reusable")
+        assert(imageStore.images(for: [model.entries[0]])[keys[0]] != nil,
+               "Releasing resident images must preserve the disk cache for an application's return")
+
+        await model.drop(keys[1], in: .hidden, before: nil)
+        await model.drop(keys[2], in: .alwaysHidden, before: nil)
+        let concealedProfile = currentProfiles()
+        let concealedApprovals = currentApprovals()
+        let concealedPositions = currentPositions()
+        assert(model.showHiddenItems() && model.areHiddenItemsRevealed)
+        assert(currentApprovals()["com.example.1"] == true && currentApprovals()["com.example.2"] == true)
+        assert(currentApprovals()["com.example.3"] == false,
+               "Revealing Hidden Items must never reveal Always Hidden Items")
+        assert(currentProfiles() == concealedProfile && currentPositions() == concealedPositions,
+               "Temporary reveal must preserve authored sections and native order")
+        assert(model.showHiddenItems(), "Repeated show requests must be idempotent")
+        assert(model.hideHiddenItems() && !model.areHiddenItemsRevealed)
+        assert(currentApprovals() == concealedApprovals, "Hiding must restore the exact prior approvals")
+        assert(model.showHiddenItems())
+        model.restoreTemporaryVisibility()
+        assert(!model.areHiddenItemsRevealed && currentApprovals() == concealedApprovals,
+               "Quit/startup recovery must restore an interrupted reveal")
+        assert(model.showHiddenItems())
+        await model.drop(keys[1], in: .visible, before: nil)
+        assert(!model.areHiddenItemsRevealed && currentApprovals()["com.example.3"] == false,
+               "An arrangement edit must end temporary reveal before applying permanent visibility")
+        await model.drop(keys[2], in: .visible, before: nil)
+        assert(currentPositions() == initial && currentApprovals().values.allSatisfy { $0 })
 
         await model.drop(keys[0], in: .visible, before: keys[2])
         let right = try positions.positions()
@@ -367,5 +436,8 @@ struct ModernLayoutModelRegression {
         print("Recapture: temporary visibility restores on success, failure, cancellation and interrupted-capture recovery")
         print("Insertion: migration, independent marker movement, before/after drops, profile copy/undo, new-app order/visibility, persistence and idempotent scans passed")
         print("Background discovery: nonblocking editor state and stale scan rejection passed")
+        print("Image cache lifetime: departed images released, current images reused and disk images restored")
+        print("Temporary reveal: Hidden only, unchanged Always Hidden, idempotence, authored layout preservation, restoration and edit cleanup passed")
+        print("Native spacers: explicit blank image, stable native identifier, image-only rendering, resizing and removal passed")
     }
 }

@@ -153,6 +153,10 @@ extension EventManager {
         else {
             return
         }
+        if #available(macOS 27.0, *), let point = MouseCursor.locationCoreGraphics,
+           ModernMenuBarDiscovery.isMenuBarItem(at: point) {
+            return
+        }
 
         Task {
             // Short delay helps the toggle action feel more natural.
@@ -160,6 +164,8 @@ extension EventManager {
 
             if NSEvent.modifierFlags == .control {
                 handleShowRightClickMenu()
+            } else if #available(macOS 27.0, *) {
+                appState.menuBarManager.section(withName: .hidden)?.toggle()
             } else if
                 NSEvent.modifierFlags == .option,
                 appState.settingsManager.advancedSettingsManager.canToggleAlwaysHiddenSection
@@ -260,6 +266,10 @@ extension EventManager {
             isMouseInsideEmptyMenuBarSpace,
             let mouseLocation = MouseCursor.locationAppKit
         else {
+            return
+        }
+        if #available(macOS 27.0, *), let point = MouseCursor.locationCoreGraphics,
+           ModernMenuBarDiscovery.isMenuBarItem(at: point) {
             return
         }
         appState.menuBarManager.showRightClickMenu(at: mouseLocation)
@@ -489,6 +499,12 @@ extension EventManager {
             let mouseLocation = MouseCursor.locationCoreGraphics
         else {
             return false
+        }
+        if #available(macOS 27.0, *) {
+            // Mouse-move checks use the published scan; clicks verify a fresh AX hit above.
+            return appState?.modernMenuBarLayout.entries.contains {
+                $0.isVisible && $0.frame.contains(mouseLocation)
+            } ?? false
         }
         let menuBarItems = MenuBarItem.getMenuBarItems(on: screen.displayID, onScreenOnly: true, activeSpaceOnly: true)
         return menuBarItems.contains { $0.frame.contains(mouseLocation) }

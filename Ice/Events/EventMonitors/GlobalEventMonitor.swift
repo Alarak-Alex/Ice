@@ -72,14 +72,15 @@ extension GlobalEventMonitor {
 
 extension GlobalEventMonitor.GlobalEventPublisher {
     private final class GlobalEventSubscription<S: Subscriber<Output, Failure>>: Subscription {
-        var subscriber: S?
-        let monitor: GlobalEventMonitor
+        private let mask: NSEvent.EventTypeMask
+        private var subscriber: S?
+        private lazy var monitor = GlobalEventMonitor(mask: mask) { [weak self] event in
+            _ = self?.subscriber?.receive(event)
+        }
 
         init(mask: NSEvent.EventTypeMask, subscriber: S) {
+            self.mask = mask
             self.subscriber = subscriber
-            self.monitor = GlobalEventMonitor(mask: mask) { event in
-                _ = subscriber.receive(event)
-            }
             monitor.start()
         }
 

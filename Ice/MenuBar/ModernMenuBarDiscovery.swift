@@ -45,6 +45,27 @@ enum ModernMenuBarDiscovery {
         var entry: ModernMenuBarEntry
     }
 
+    /// MenuBarAgent does not expose individual items through WindowServer.
+    static func isMenuBarItem(at point: CGPoint) -> Bool {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.1)
+        var element: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &element) == .success else {
+            return true
+        }
+        for _ in 0..<8 {
+            guard let current = element else { return true }
+            AXUIElementSetMessagingTimeout(current, 0.1)
+            guard let role = value(current, kAXRoleAttribute) as? String else { return true }
+            if [kAXMenuBarItemRole, kAXButtonRole, kAXPopUpButtonRole].contains(role) { return true }
+            if role == kAXMenuBarRole || role == kAXApplicationRole { return false }
+            guard let parent = value(current, kAXParentAttribute),
+                  CFGetTypeID(parent) == AXUIElementGetTypeID() else { return true }
+            element = (parent as! AXUIElement)
+        }
+        return true
+    }
+
     static func scan(_ applications: [Application], positions: [String: Double], menuBands: [CGRect], excluding excludedBundleID: String) -> [ModernMenuBarEntry] {
         var entries = applications.filter { $0.bundleID != excludedBundleID && $0.bundleID != "com.apple.MenuBarAgent" }
             .flatMap { observations($0, positions: positions, menuBands: menuBands).map(\.entry) }

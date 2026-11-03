@@ -8,7 +8,11 @@ protocol MenuBarSpacerManaging: AnyObject {
 
 @MainActor
 final class MenuBarSpacerManager: MenuBarSpacerManaging {
-    private var items = [UUID: NSStatusItem]()
+    private(set) var items = [UUID: NSStatusItem]()
+
+    deinit {
+        for item in items.values { NSStatusBar.system.removeStatusItem(item) }
+    }
 
     static func positionKey(for id: UUID) -> String {
         "status:\(Constants.bundleIdentifier)::Spacer-\(id.uuidString)"
@@ -24,14 +28,25 @@ final class MenuBarSpacerManager: MenuBarSpacerManaging {
             if let existing = items[spacer.id] {
                 item = existing
             } else {
-                item = NSStatusBar.system.statusItem(withLength: spacer.validatedWidth)
+                item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
                 item.autosaveName = "Spacer-\(spacer.id.uuidString)"
-                item.button?.image = nil
-                item.button?.title = ""
-                item.button?.setAccessibilityLabel(AppLanguage.localized("Spacer"))
                 items[spacer.id] = item
             }
             item.length = spacer.validatedWidth
+            if let button = item.button {
+                let name = "Spacer-\(spacer.id.uuidString)"
+                let imageSize = NSSize(width: spacer.validatedWidth, height: 16)
+                // Keep explicit blank content, matching the reference spacer setup.
+                if button.image?.size != imageSize {
+                    button.image = NSImage(size: imageSize)
+                }
+                button.title = ""
+                button.imagePosition = .imageOnly
+                button.identifier = NSUserInterfaceItemIdentifier(name)
+                button.setAccessibilityIdentifier(name)
+                button.setAccessibilityLabel(AppLanguage.localized("Spacer"))
+                button.toolTip = AppLanguage.localized("Spacer")
+            }
             item.isVisible = spacer.section == .visible
         }
     }

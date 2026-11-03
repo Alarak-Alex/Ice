@@ -29,6 +29,12 @@ updated since 2025-09.
   `TrailingItemPreferredPositions`, keep a private backup in
   `~/Library/Application Support/Ice/MenuBarLayout.before.plist`, verify readback,
   and reject stale writes. A file picker provides access when needed.
+- Overflowing layout bars support native horizontal scrolling, ordinary mouse
+  wheels and dragging the empty background. Icon dragging remains reserved for
+  reordering; browsing preserves the scroll offset through refreshes.
+- Tracking-mode event observation peeks at matching events without draining and
+  reposting AppKit's event queue. Pending events are delivered once; event
+  subscriptions release their subscribers on cancellation.
 - Native drag sessions require an active app, key window and a physically pressed
   left mouse button. Background synthetic drags are rejected. An earlier
   background automation test left a native drag session active and interfered
@@ -40,7 +46,17 @@ updated since 2025-09.
 - Palette spacers own native NSStatusItems with stable autosave names and
   validated widths of 1–200 points. Profile selection registers visible spacers
   before restoring their saved positions. Registration failures restore metadata
-  and the prior native hosts.
+  and the prior native hosts. The native button has an explicit blank image,
+  image-only positioning, and stable button/accessibility identifiers, matching
+  the observed reference setup. Native registration/drop acceptance remains
+  unverified.
+- Blank-menu-space clicks on macOS 27 route to the modern hidden-section
+  reveal path. Only Hidden applications and spacers are revealed; Always Hidden
+  stays concealed. The original approvals are journaled separately from image
+  capture and restored on hide, permanent layout changes, launch, or normal exit.
+  Clicks use a fresh conservative AX hit test, while mouse movement uses cached
+  item frames. This behavior passes model fixtures but physical blank-click
+  acceptance remains unverified.
 - The draggable “New Items here” marker saves a section and insertion anchor
   per profile. Existing applications keep their saved memberships, including
   stopped applications; newly discovered applications use the marker's section
@@ -61,6 +77,8 @@ updated since 2025-09.
   restores interrupted captures at launch and normal exit.
   Photos with uncertain mixed white badges or wide colored metrics use the app
   icon fallback when their background cannot be removed safely.
+  The resident image cache retains only currently discovered items; images of
+  stopped applications remain on disk and load again when needed.
 - The legacy Ice Bar and hiding engine have not been ported to MenuBarAgent.
   macOS 14–26 retain the original section editor, with drag cancellation, view
   reuse, and image-cache publication fixes.
@@ -143,6 +161,14 @@ swiftc -parse-as-library \
   Ice/Utilities/AppLanguage.swift \
   Scripts/SettingsNavigationRegression.swift -o /tmp/ice-settings-navigation-regression
 /tmp/ice-settings-navigation-regression
+
+swiftc -parse-as-library \
+  Ice/Events/EventMonitors/LocalEventMonitor.swift \
+  Ice/Events/EventMonitors/GlobalEventMonitor.swift \
+  Ice/Events/EventMonitors/UniversalEventMonitor.swift \
+  Ice/Events/EventMonitors/RunLoopLocalEventMonitor.swift \
+  Scripts/EventMonitorRegression.swift -o /tmp/ice-event-monitor-regression
+/tmp/ice-event-monitor-regression
 ```
 
 The model fixtures cover both reorder directions, empty/nonempty cross-section
@@ -156,6 +182,22 @@ highlights, empty images and faint marks. The view fixture checks single-row
 geometry, icon fallback, hit testing, stable views and background drag rejection.
 The spacing fixture uses a separate random preferences domain; it does not
 change system spacing.
+
+The horizontal browsing fixture loads the production scroll view with 30 items
+in a narrow viewport. It checks empty-space panning in both directions, mouse
+wheel and trackpad deltas, edge clamping, access to the final item, refresh-offset
+preservation and selection without starting a native drag session. The model
+fixture also checks that departed item images are released while current images
+stay reusable and the disk cache remains intact. Event-monitor checks use only
+the test process's queue: observation preserves event order without repeated
+delivery, cancellation stops delivery, and all four publishers release
+cancelled subscribers.
+
+The model fixture additionally checks explicit native spacer image content,
+stable identity on resize and manager removal, Hidden-only temporary reveal,
+Always Hidden exclusion, repeated show requests, unchanged profiles/order,
+exact approval restoration, quit/startup recovery, and restoring temporary
+visibility before permanent layout edits.
 
 The navigation fixture loads the production sidebar with placeholder detail
 panes. It checks all six native table rows, first-mouse acceptance, isolated
@@ -176,6 +218,22 @@ back to app icons, and exact pixel parity has not been demonstrated. The inserti
 marker and new-app placement pass isolated model and native-view fixtures.
 Foreground mouse dragging, native spacer placement,
 hidden-spacer reveal behavior and multiple displays still require runtime proof.
+The native horizontal scrollbar reached its right end in the installed app.
+The later palette drag attempt through background automation did not produce an
+accepted drop.
+A temporary profile fixture was restored byte-for-byte before it was launched;
+it supplies no additional native-registration proof.
+
+Performance samples taken on 2026-11-03 no longer contained the old
+`RunLoopLocalEventMonitor` queue-reposting hotspot. One post-change sample
+reported an 88.0 MB footprint (108.3 MB peak); a separate `leaks` run reported
+175 allocations / 5,648 bytes. The remaining roots were not conclusively
+attributed, workloads/lifetimes differed, and no controlled overall CPU or
+long-term memory comparison was performed. These checks do not establish
+zero leaks.
+
+The public stage summary is synchronized in [README.md](README.md) and
+[README.zh-CN.md](README.zh-CN.md).
 
 ## Build and install
 

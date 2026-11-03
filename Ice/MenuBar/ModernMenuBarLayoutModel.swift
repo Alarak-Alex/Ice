@@ -17,6 +17,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     @Published private(set) var profiles = [MenuBarLayoutProfile]()
     @Published private(set) var activeProfileID: UUID?
     @Published private(set) var itemImages = [String: NSImage]()
+    @Published private(set) var areHiddenItemsRevealed = false
     @Published var selectedEntry: Entry?
     @Published var errorMessage: String?
     @Published private(set) var notice: String?
@@ -59,6 +60,12 @@ final class ModernMenuBarLayoutModel: ObservableObject {
             url: visibilityAuthorizedURL ?? home.appendingPathComponent("Library/Group Containers/group.com.apple.controlcenter/Library/Preferences/group.com.apple.controlcenter.plist"),
             backupURL: home.appendingPathComponent("Library/Application Support/Ice/MenuBarVisibility.before.plist")
         )
+    }
+
+    private var revealVisibilityStore: MenuBarVisibilityStore {
+        var store = visibilityStore
+        store.temporaryVisibilityJournalName = "MenuBarReveal.visibility.plist"
+        return store
     }
 
     private var menuBands: [CGRect] {
@@ -247,7 +254,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     }
 
     func recaptureImages() async {
-        guard !isBusy else { return }
+        guard !isBusy, hideHiddenItems() else { return }
         isCapturingImages = true
         errorMessage = nil
         defer { isCapturingImages = false }
@@ -277,6 +284,45 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     func restoreTemporaryVisibility() {
         do { try visibilityStore.restoreTemporaryVisibility() }
         catch { errorMessage = error.localizedDescription }
+        _ = hideHiddenItems()
+    }
+
+    @discardableResult
+    func showHiddenItems() -> Bool {
+        guard !isBusy else { return false }
+        guard !areHiddenItemsRevealed else { return true }
+        let hidden = Set((activeProfile?.sections ?? [:]).filter { $0.value == .hidden }.map(\.key))
+            .union(entries.filter { section(for: $0) == .hidden }.map(\.bundleID))
+        do {
+            let approvals = try revealVisibilityStore.approvals()
+            for bundle in hidden.sorted() where approvals[bundle] == false {
+                try revealVisibilityStore.beginTemporaryVisibility(for: bundle)
+            }
+            areHiddenItemsRevealed = true
+            synchronizeSpacers()
+            return true
+        } catch {
+            var message = error.localizedDescription
+            do { try revealVisibilityStore.restoreTemporaryVisibility() }
+            catch { message += "\n" + error.localizedDescription }
+            errorMessage = message
+            return false
+        }
+    }
+
+    @discardableResult
+    func hideHiddenItems() -> Bool {
+        do {
+            try revealVisibilityStore.restoreTemporaryVisibility()
+            if areHiddenItemsRevealed {
+                areHiddenItemsRevealed = false
+                synchronizeSpacers()
+            }
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
     }
 
     func authorize() {
@@ -348,7 +394,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     @discardableResult
     private func applyLayout(source: Entry, target: Entry? = nil, after: Bool = false,
                              section: MenuBarLayoutSection? = nil, placement: MenuBarNewItemPlacement? = nil) async -> Bool {
-        guard !isBusy, canEdit, let sourceKey = source.positionKey else { return false }
+        guard !isBusy, canEdit, let sourceKey = source.positionKey, hideHiddenItems() else { return false }
         isApplying = true
         errorMessage = nil
         orderVerificationTask?.cancel()
@@ -432,7 +478,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     }
 
     func undo() async {
-        guard !isBusy, canUndo else { return }
+        guard !isBusy, canUndo, hideHiddenItems() else { return }
         guard let previousPositions, let writtenPositions else { return }
         isApplying = true
         defer { isApplying = false }
@@ -555,7 +601,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     }
 
     func drop(_ sourceID: String, in section: MenuBarLayoutSection, before targetID: String?) async {
-        guard !isBusy else { return }
+        guard !isBusy, hideHiddenItems() else { return }
         errorMessage = nil
         let destination = displayEntries(in: section)
         guard targetID == nil || destination.contains(where: { $0.id == targetID }) else {
@@ -733,7 +779,8 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     }
 
     func selectProfile(_ id: UUID) async {
-        guard !isBusy, id != activeProfileID, let profile = profiles.first(where: { $0.id == id }) else { return }
+        guard !isBusy, id != activeProfileID, let profile = profiles.first(where: { $0.id == id }),
+              hideHiddenItems() else { return }
         isApplying = true
         errorMessage = nil
         defer { isApplying = false }
@@ -801,9 +848,19 @@ final class ModernMenuBarLayoutModel: ObservableObject {
     }
 
     private func saveProfiles() {
-        spacerManager?.synchronize(activeProfile?.spacers ?? [])
+        synchronizeSpacers()
         if let data = try? JSONEncoder().encode(profiles) { defaults.set(data, forKey: "MenuBarLayoutProfiles.v1") }
         defaults.set(activeProfileID?.uuidString, forKey: "MenuBarLayoutActiveProfile.v1")
+    }
+
+    private func synchronizeSpacers() {
+        var spacers = activeProfile?.spacers ?? []
+        if areHiddenItemsRevealed {
+            for index in spacers.indices where spacers[index].section == .hidden {
+                spacers[index].section = .visible
+            }
+        }
+        spacerManager?.synchronize(spacers)
     }
 
     private func registeredSpacerPositions(_ spacers: [MenuBarLayoutSpacer]) async throws -> [String: Double] {
