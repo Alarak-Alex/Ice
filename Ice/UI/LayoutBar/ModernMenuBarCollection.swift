@@ -115,7 +115,10 @@ final class MenuBarSpacerPaletteChip: NSView, NSDraggingSource {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.cornerRadius = 13
-        layer?.backgroundColor = NSColor.systemBlue.cgColor
+        layer?.shadowColor = NSColor.systemBlue.cgColor
+        layer?.shadowOpacity = 0.25
+        layer?.shadowRadius = 5
+        layer?.shadowOffset = NSSize(width: 0, height: -1)
         let icon = NSImageView(image: iconImage)
         icon.contentTintColor = .white
         icon.frame = NSRect(x: 10, y: 7, width: 12, height: 12)
@@ -134,6 +137,29 @@ final class MenuBarSpacerPaletteChip: NSView, NSDraggingSource {
     override var intrinsicContentSize: NSSize { NSSize(width: label.intrinsicContentSize.width + 38, height: 26) }
     override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
 
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: 13, cornerHeight: 13, transform: nil)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let shape = NSBezierPath(roundedRect: bounds, xRadius: 13, yRadius: 13)
+        let highlight = NSColor.systemBlue.blended(withFraction: 0.18, of: .white) ?? .systemBlue
+        NSGradient(starting: highlight, ending: .systemBlue)?.draw(in: shape, angle: -90)
+        NSColor.white.withAlphaComponent(0.22).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.25, dy: 0.25), xRadius: 12.75, yRadius: 12.75)
+        border.lineWidth = 0.5
+        border.stroke()
+    }
+
+    func draggingImage() -> NSImage {
+        guard let bitmap = bitmapImageRepForCachingDisplay(in: bounds) else { return iconImage }
+        cacheDisplay(in: bounds, to: bitmap)
+        let image = NSImage(size: bounds.size)
+        image.addRepresentation(bitmap)
+        return image
+    }
+
     override func mouseDragged(with event: NSEvent) {
         guard MenuBarLayoutDragPolicy.canBegin(eventType: event.type, appIsActive: NSApp.isActive,
                                               windowIsKey: window?.isKeyWindow == true,
@@ -143,7 +169,7 @@ final class MenuBarSpacerPaletteChip: NSView, NSDraggingSource {
         let item = NSPasteboardItem()
         item.setString("palette-spacer", forType: Self.pasteboardType)
         let draggingItem = NSDraggingItem(pasteboardWriter: item)
-        draggingItem.setDraggingFrame(bounds, contents: iconImage)
+        draggingItem.setDraggingFrame(bounds, contents: draggingImage())
         beginDraggingSession(with: [draggingItem], event: event, source: self)
     }
 

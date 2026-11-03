@@ -140,6 +140,7 @@ swiftc -parse-as-library \
 
 swiftc -parse-as-library \
   Ice/UI/LayoutBar/ModernMenuBarCollection.swift \
+  Ice/UI/Views/SettingsPaneHeader.swift \
   Ice/MenuBar/ModernMenuBarDiscovery.swift \
   Ice/MenuBar/MenuBarLayoutProfile.swift \
   Ice/MenuBar/MenuBarItemIdentityResolver.swift \
@@ -195,6 +196,15 @@ stay reusable and the disk cache remains intact. Event-monitor checks use only
 the test process's queue: observation preserves event order without repeated
 delivery, cancellation stops delivery, and all four publishers release
 cancelled subscribers.
+
+The palette preview checks that a native drag image retains the complete label
+and its text, rather than stretching only the glyph over the label's frame.
+Optional light/dark English/Chinese appearance snapshots can be generated with
+`ICE_LAYOUT_APPEARANCE_SNAPSHOT_DIR=/tmp/ice-layout-appearance /tmp/ice-modern-view-regression`.
+The layout page uses a 181-point title panel and 64-point icon measured from the
+saved Bartender reference; other settings pages keep their compact header.
+Color comparisons convert the reference display profile to sRGB first.
+These component renders do not prove full-window pixel parity.
 
 The model fixture additionally checks blank/text/symbol native content,
 legacy spacer decoding, invalid-symbol rejection, unchanged-image reuse,

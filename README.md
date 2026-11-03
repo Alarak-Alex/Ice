@@ -50,6 +50,7 @@ November 3, 2026.
   registration fails. Native identities remain stable through content edits,
   and existing blank spacers remain compatible. Icon/spacer sorting uses the
   same native order, preserves hidden spacer anchors, and supports undo.
+  The palette uses a shaded label and retains its complete text during dragging.
   Startup registration of a saved
   spacer was verified locally; physical palette drag/drop and placement still
   need runtime acceptance.

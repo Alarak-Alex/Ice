@@ -23,6 +23,9 @@ struct ModernMenuBarLayoutSettingsPane: View {
                 subtitle: "Drag items between sections to rearrange the menu bar.",
                 systemImage: "rectangle.bottomthird.inset.filled"
             )
+            .controlSize(.large)
+            .frame(minHeight: 181)
+            .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 16))
 
             configurationSection
                 .padding(.bottom, 12)
@@ -274,7 +277,7 @@ struct ModernMenuBarLayoutSettingsPane: View {
                 Spacer()
             }
             .padding(.horizontal, 36)
-            .frame(height: 52)
+            .frame(height: 50)
             .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
 
             Text("Drag the label to the Shown or Hidden section to add spacing. Click a spacer to edit it; right-click to remove it.")

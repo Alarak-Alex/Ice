@@ -6,27 +6,31 @@
 import SwiftUI
 
 struct SettingsPaneHeader: View {
+    @Environment(\.controlSize) private var controlSize
+
     let title: LocalizedStringKey
     let subtitle: LocalizedStringKey
     let systemImage: String
     var tint: Color = .blue
 
     var body: some View {
+        let isLarge = controlSize == .large
+        let cornerRadius: CGFloat = isLarge ? 15 : 13
         VStack(spacing: 12) {
             icon
                 .font(.system(size: 34, weight: .medium))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(tint.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .frame(width: isLarge ? 64 : 56, height: isLarge ? 64 : 56)
+                .background(tint.gradient, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
                 }
                 .accessibilityHidden(true)
 
             VStack(spacing: 6) {
                 Text(title)
-                    .font(.system(size: 24, weight: .bold))
+                    .font(.system(size: isLarge ? 26 : 24, weight: .bold))
                     .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
                     .font(.system(size: 13))
@@ -36,7 +40,7 @@ struct SettingsPaneHeader: View {
             .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 20)
+        .padding(.vertical, isLarge ? 24 : 20)
         .frame(maxWidth: .infinity)
     }
 

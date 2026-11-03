@@ -1,4 +1,4 @@
-// Compile with ModernMenuBarCollection, ModernMenuBarDiscovery, profile, identity resolver and AppLanguage.
+// Compile with ModernMenuBarCollection, SettingsPaneHeader, discovery, profile, identity resolver and AppLanguage.
 import Cocoa
 import SwiftUI
 
@@ -39,6 +39,19 @@ struct ModernLayoutViewRegression {
         let palette = MenuBarSpacerPaletteChip()
         palette.mouseDragged(with: backgroundEvent)
         assert(!item.isDragging && !palette.isDragging, "Background automation must not start a global drag session")
+        palette.setFrameSize(palette.intrinsicContentSize)
+        palette.layoutSubtreeIfNeeded()
+        let palettePreview = palette.draggingImage()
+        assert(palettePreview.size == palette.bounds.size, "The palette preview must retain the complete label's dimensions")
+        let paletteBitmap = palettePreview.representations.compactMap { $0 as? NSBitmapImageRep }.first!
+        let labelStart = Int(28 * CGFloat(paletteBitmap.pixelsWide) / palette.bounds.width)
+        let containsLabel = (labelStart..<paletteBitmap.pixelsWide).contains { x in
+            (0..<paletteBitmap.pixelsHigh).contains { y in
+                guard let color = paletteBitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
+                return color.alphaComponent > 0.5 && min(color.redComponent, color.greenComponent, color.blueComponent) > 0.85
+            }
+        }
+        assert(containsLabel, "The palette drag preview must include its text instead of stretching the glyph")
 
         let entries = (0..<30).map { index in
             ModernMenuBarEntry(id: "item-\(index)", name: "Item \(index)", bundleID: "com.example.\(index)",
@@ -192,9 +205,44 @@ struct ModernLayoutViewRegression {
                     .write(to: url.appendingPathComponent("\(content.rawValue).png"))
             }
         }
+        if let directory = ProcessInfo.processInfo.environment["ICE_LAYOUT_APPEARANCE_SNAPSHOT_DIR"] {
+            let url = URL(fileURLWithPath: directory)
+            try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            for (language, title, subtitle) in [
+                ("en", "Menu Bar", "Drag items between sections to rearrange the menu bar."),
+                ("zh", "菜单栏", "在各部分之间拖动项目以重新排列菜单栏。")
+            ] {
+                for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                    let content = VStack(spacing: 24) {
+                        SettingsPaneHeader(title: LocalizedStringKey(title), subtitle: LocalizedStringKey(subtitle),
+                                           systemImage: "rectangle.bottomthird.inset.filled")
+                            .controlSize(.large)
+                            .frame(minHeight: 181)
+                            .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 16))
+                        MenuBarSpacerPaletteView().fixedSize().padding(24)
+                    }
+                    .padding(16)
+                    .frame(width: 650)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    let host = NSHostingView(rootView: content)
+                    host.appearance = NSAppearance(named: appearance)
+                    let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 650, height: 300),
+                                         styleMask: [], backing: .buffered, defer: false)
+                    panel.contentView = host
+                    host.layoutSubtreeIfNeeded()
+                    panel.setContentSize(host.fittingSize)
+                    host.layoutSubtreeIfNeeded()
+                    let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+                    host.cacheDisplay(in: host.bounds, to: bitmap)
+                    try! bitmap.representation(using: .png, properties: [:])!
+                        .write(to: url.appendingPathComponent("\(language)-\(appearance.rawValue).png"))
+                }
+            }
+        }
         print("Modern layout: fallback icons, app badges, hit testing, selection accessibility, single row, stable views and background drag rejection passed")
         print("Horizontal browsing: empty-space panning, mouse wheel, trackpad, both edges, last-item selection and refresh offset passed")
         print("Insertion marker: one row, fixed geometry, bilingual two-line rendering, label hit testing, selection and distinct spacer behavior passed")
         print("Spacer views: trimmed text, template symbols, blank content, stable native views and edit/remove actions passed")
+        print("Palette: complete label dimensions and visible text retained in the native drag preview")
     }
 }
