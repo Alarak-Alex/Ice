@@ -7,24 +7,63 @@ import SwiftUI
 
 struct MenuBarLayoutSettingsPane: View {
     @EnvironmentObject var appState: AppState
+    @State private var isRefreshing = false
+    @State private var itemCache = MenuBarItemManager.ItemCache()
 
+    @ViewBuilder
     var body: some View {
-        if !ScreenCapture.cachedCheckPermissions() {
-            missingScreenRecordingPermission
-        } else if appState.menuBarManager.isMenuBarHiddenBySystemUserDefaults {
+        if #available(macOS 27.0, *) {
+            ModernMenuBarLayoutSettingsPane(model: appState.modernMenuBarLayout)
+        } else {
+            legacyBody
+        }
+    }
+
+    @ViewBuilder
+    private var legacyBody: some View {
+        if appState.menuBarManager.isMenuBarHiddenBySystemUserDefaults {
             cannotArrange
         } else {
             IceForm(alignment: .leading, spacing: 20) {
                 header
+                if !ScreenCapture.cachedCheckPermissions() {
+                    missingScreenRecordingPermission
+                }
                 layoutBars
             }
+            .onReceive(appState.itemManager.$itemCache) { itemCache = $0 }
+            .task { refresh() }
         }
     }
 
     @ViewBuilder
     private var header: some View {
-        Text("Drag to arrange your menu bar items")
-            .font(.title2)
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Menu Bar Layout")
+                    .font(.title2.weight(.semibold))
+                Text("Drag items to change their order. Changes apply immediately.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                refresh()
+            } label: {
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(isRefreshing)
+            .help("Refresh menu bar item images")
+        }
 
         IceGroupBox {
             AnnotationView(
@@ -58,9 +97,9 @@ struct MenuBarLayoutSettingsPane: View {
 
     @ViewBuilder
     private var missingScreenRecordingPermission: some View {
-        VStack {
-            Text("Menu bar layout requires screen recording permissions")
-                .font(.title2)
+        IceGroupBox {
+            Text("App icons are shown when menu bar images are unavailable.")
+                .font(.callout)
 
             Button {
                 appState.navigationState.settingsNavigationIdentifier = .advanced
@@ -78,13 +117,49 @@ struct MenuBarLayoutSettingsPane: View {
             section.isEnabled
         {
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(section.name.displayString) Section")
-                    .font(.system(size: 14))
-                    .padding(.leading, 2)
+                HStack {
+                    Text(sectionTitle(for: section.name))
+                        .font(.headline)
+                    Spacer()
+                    Text(itemCache.managedItems(for: section.name).count, format: .number)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 2)
 
                 LayoutBar(section: section)
-                    .environmentObject(appState.imageCache)
+                    .overlay {
+                        if itemCache.managedItems(for: section.name).isEmpty {
+                            Text("Drag items here")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .allowsHitTesting(false)
+                        }
+                    }
             }
+        }
+    }
+
+    private func sectionTitle(for section: MenuBarSection.Name) -> LocalizedStringKey {
+        switch section {
+        case .visible:
+            "Visible"
+        case .hidden:
+            "Hidden"
+        case .alwaysHidden:
+            "Always Hidden"
+        }
+    }
+
+    private func refresh() {
+        guard !isRefreshing else {
+            return
+        }
+        isRefreshing = true
+        Task {
+            await appState.itemManager.cacheItemsIfNeeded(force: true)
+            await appState.imageCache.updateCache()
+            isRefreshing = false
         }
     }
 }

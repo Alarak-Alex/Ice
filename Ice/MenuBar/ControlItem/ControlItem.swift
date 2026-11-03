@@ -425,7 +425,7 @@ final class ControlItem {
         let menu = NSMenu(title: "Ice")
 
         let settingsItem = NSMenuItem(
-            title: "Ice Settings…",
+            title: AppLanguage.localized("Ice Settings…"),
             action: #selector(AppDelegate.openSettingsWindow),
             keyEquivalent: ","
         )
@@ -435,7 +435,7 @@ final class ControlItem {
         menu.addItem(.separator())
 
         let searchItem = NSMenuItem(
-            title: "Search Menu Bar Items",
+            title: AppLanguage.localized("Search Menu Bar Items"),
             action: #selector(showSearchPanel),
             keyEquivalent: ""
         )
@@ -461,8 +461,15 @@ final class ControlItem {
                 // Section doesn't exist, or is disabled.
                 continue
             }
+            let title: String = switch (name, section.isHidden) {
+            case (.hidden, true): AppLanguage.localized("Show Hidden Section")
+            case (.hidden, false): AppLanguage.localized("Hide Hidden Section")
+            case (.alwaysHidden, true): AppLanguage.localized("Show Always Hidden Section")
+            case (.alwaysHidden, false): AppLanguage.localized("Hide Always Hidden Section")
+            case (.visible, _): AppLanguage.localized("Visible")
+            }
             let item = NSMenuItem(
-                title: "\(section.isHidden ? "Show" : "Hide") the \(name.displayString) Section",
+                title: title,
                 action: #selector(toggleMenuBarSection),
                 keyEquivalent: ""
             )
@@ -494,7 +501,7 @@ final class ControlItem {
         menu.addItem(.separator())
 
         let checkForUpdatesItem = NSMenuItem(
-            title: "Check for Updates…",
+            title: AppLanguage.localized("Check for Updates…"),
             action: #selector(checkForUpdates),
             keyEquivalent: ""
         )
@@ -504,7 +511,7 @@ final class ControlItem {
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
-            title: "Quit Ice",
+            title: AppLanguage.localized("Quit Ice"),
             action: #selector(NSApp.terminate),
             keyEquivalent: "q"
         )

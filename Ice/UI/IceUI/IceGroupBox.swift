@@ -12,7 +12,7 @@ struct IceGroupBox<Header: View, Content: View, Footer: View>: View {
     private let padding: CGFloat
 
     private var backgroundShape: some InsettableShape {
-        RoundedRectangle(cornerRadius: 6, style: .circular)
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
     }
 
     init(
@@ -89,11 +89,9 @@ struct IceGroupBox<Header: View, Content: View, Footer: View>: View {
             }
             .padding(padding)
             .background {
-                backgroundShape
-                    .fill(.quinary)
+                backgroundShape.fill(Color(nsColor: .controlBackgroundColor))
                     .overlay {
-                        backgroundShape
-                            .strokeBorder(.quaternary)
+                        backgroundShape.strokeBorder(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 0.5)
                     }
             }
             footer

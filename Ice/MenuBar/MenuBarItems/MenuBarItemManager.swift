@@ -300,7 +300,7 @@ extension MenuBarItemManager {
                         let section = cache.section(for: targetItem),
                         let index = cache[section].firstIndex(matching: targetItem.info)
                     {
-                        let clampedIndex = (index - 1).clamped(to: cache[section].startIndex...cache[section].endIndex)
+                        let clampedIndex = (index + 1).clamped(to: cache[section].startIndex...cache[section].endIndex)
                         cache[section].insert(item, at: clampedIndex)
                     }
                 }
@@ -312,7 +312,12 @@ extension MenuBarItemManager {
 
     /// Caches the current menu bar items if needed, ensuring that the control
     /// items are in the correct order.
-    func cacheItemsIfNeeded() async {
+    func cacheItemsIfNeeded(force: Bool = false) async {
+        if #available(macOS 27.0, *), let appState {
+            guard !isMouseButtonDown, !appState.modernMenuBarLayout.isBusy else { return }
+            await appState.modernMenuBarLayout.refresh(captureImages: false)
+            return
+        }
         do {
             try await waitForItemsToStopMoving(timeout: .seconds(1))
         } catch is TaskTimeoutError {
@@ -326,7 +331,7 @@ extension MenuBarItemManager {
         }
 
         let itemWindowIDs = Bridging.getWindowList(option: [.menuBarItems, .activeSpace])
-        if cachedItemWindowIDs == itemWindowIDs {
+        if !force && cachedItemWindowIDs == itemWindowIDs {
             logSkippingCache(reason: "item windows have not changed")
             return
         } else {

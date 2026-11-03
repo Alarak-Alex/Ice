@@ -14,6 +14,7 @@ struct HotkeysSettingsPane: View {
 
     var body: some View {
         IceForm {
+            SettingsPaneHeader(title: "Hotkeys", subtitle: "Control Ice with keyboard shortcuts.", systemImage: "command")
             IceSection("Menu Bar Sections") {
                 hotkeyRecorder(forSection: .hidden)
                 hotkeyRecorder(forSection: .alwaysHidden)

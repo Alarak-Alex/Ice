@@ -1,0 +1,94 @@
+// Compile with ModernMenuBarCollection, ModernMenuBarDiscovery, identity resolver and AppLanguage.
+import Cocoa
+
+@main
+struct ModernLayoutViewRegression {
+    @MainActor
+    static func main() {
+        _ = NSApplication.shared
+        let appImage = NSImage(size: NSSize(width: 24, height: 24))
+        let statusImage = NSImage(size: NSSize(width: 18, height: 18))
+        let item = MenuBarLayoutItemView(entryID: "one")
+        item.frame = NSRect(x: 30, y: 10, width: 40, height: 40)
+        item.updateImages(itemImage: nil, appImage: appImage, showAppIcon: false)
+        assert(item.icon.image === appImage, "The fallback icon must survive disabling app badges")
+        item.updateImages(itemImage: statusImage, appImage: appImage, showAppIcon: true)
+        item.layoutSubtreeIfNeeded()
+        assert(item.icon.image === statusImage && !item.appIcon.isHidden)
+        assert(item.appIcon.frame.maxX < item.icon.frame.minX, "The badge belongs beside the status image")
+        assert(item.hitTest(NSPoint(x: 50, y: 30)) === item, "Images must not intercept item drag events")
+        let wideImage = NSImage(size: NSSize(width: 90, height: 18))
+        item.updateImages(itemImage: wideImage, appImage: appImage, showAppIcon: false)
+        item.setFrameSize(NSSize(width: item.preferredWidth, height: 40))
+        item.layoutSubtreeIfNeeded()
+        assert(item.icon.frame.width == 90 && item.icon.frame.height == 18,
+               "Text and wide status items must keep their native proportions")
+        assert(item.preferredWidth == 110)
+
+        assert(MenuBarLayoutDragPolicy.canBegin(eventType: .leftMouseDragged, appIsActive: true, windowIsKey: true, pressedMouseButtons: 1, sessionIsActive: false))
+        assert(!MenuBarLayoutDragPolicy.canBegin(eventType: .leftMouseDragged, appIsActive: false, windowIsKey: true, pressedMouseButtons: 1, sessionIsActive: false))
+        assert(!MenuBarLayoutDragPolicy.canBegin(eventType: .leftMouseDragged, appIsActive: true, windowIsKey: false, pressedMouseButtons: 1, sessionIsActive: false))
+        assert(!MenuBarLayoutDragPolicy.canBegin(eventType: .leftMouseDragged, appIsActive: true, windowIsKey: true, pressedMouseButtons: 0, sessionIsActive: false))
+        assert(!MenuBarLayoutDragPolicy.canBegin(eventType: .leftMouseDragged, appIsActive: true, windowIsKey: true, pressedMouseButtons: 1, sessionIsActive: true))
+        let backgroundEvent = NSEvent.mouseEvent(with: .leftMouseDragged, location: .zero, modifierFlags: [],
+                                               timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                               clickCount: 1, pressure: 0)!
+        item.isEditable = true
+        item.mouseDragged(with: backgroundEvent)
+        let palette = MenuBarSpacerPaletteChip()
+        palette.mouseDragged(with: backgroundEvent)
+        assert(!item.isDragging && !palette.isDragging, "Background automation must not start a global drag session")
+
+        let entries = (0..<30).map { index in
+            ModernMenuBarEntry(id: "item-\(index)", name: "Item \(index)", bundleID: "com.example.\(index)",
+                              pid: -1, frame: .zero, positionKey: "status:com.example.\(index)::Item-0",
+                              identifier: "Item-0", nativeTitle: "", isVisible: true)
+        }
+        let strip = MenuBarLayoutItemStrip(frame: NSRect(x: 0, y: 0, width: 300, height: 72))
+        strip.isEditable = true
+        strip.update(entries: entries, images: [:])
+        strip.layoutSubtreeIfNeeded()
+        assert(Set(strip.itemViews.map { $0.frame.midY }).count == 1, "A narrow viewport must never make a second row")
+        assert(strip.itemViews.last!.frame.maxX > strip.bounds.maxX)
+        assert(strip.itemViews[0].accessibilityPerformPress())
+        assert(strip.itemViews[0].isSelected && strip.itemViews[0].isAccessibilitySelected(),
+               "Accessibility press must select the layout item")
+        assert(strip.itemViews[1].accessibilityPerformPress())
+        assert(!strip.itemViews[0].isSelected && strip.itemViews[1].isSelected)
+        assert(strip.accessibilitySelectedChildren()?.count == 1, "The strip must expose one selected item")
+        let oldViews = strip.itemViews
+        strip.update(entries: entries.reversed(), images: [:])
+        strip.layoutSubtreeIfNeeded()
+        assert(strip.itemViews.first === oldViews.last, "Reordering must reuse native item views")
+        let marker = ModernMenuBarEntry(id: ModernMenuBarEntry.insertionMarkerID, name: "New Items\nhere",
+                                       bundleID: "com.example.editor", pid: -1, frame: .zero, positionKey: nil,
+                                       identifier: "", nativeTitle: "", isVisible: false)
+        strip.update(entries: [entries[0], marker, entries[1]], images: [:])
+        strip.layoutSubtreeIfNeeded()
+        let markerView = strip.itemViews[1]
+        assert(markerView.isInsertionMarker && markerView.isEditable && markerView.preferredWidth == 88)
+        assert(markerView.frame.height == 38)
+        assert(!markerView.insertionLabel.isHidden && markerView.icon.frame == .zero && markerView.appIcon.frame == .zero)
+        for text in ["New Items\nhere", "新项目\n在此处"] {
+            let label = markerView.insertionLabel
+            label.stringValue = text
+            let bitmap = label.bitmapImageRepForCachingDisplay(in: label.bounds)!
+            label.cacheDisplay(in: label.bounds, to: bitmap)
+            let textRows = (0..<bitmap.pixelsHigh).filter { y in
+                (0..<bitmap.pixelsWide).contains { x in
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
+                    return color.alphaComponent > 0.25 && min(color.redComponent, color.greenComponent, color.blueComponent) > 0.75
+                }
+            }
+            assert((textRows.last ?? 0) - (textRows.first ?? 0) >= 16,
+                   "Both insertion-label lines must be rendered without clipping in \(text)")
+        }
+        assert(markerView.hitTest(markerView.frame.origin) === markerView, "The label must not intercept marker dragging")
+        assert(Set(strip.itemViews.map { $0.frame.midY }).count == 1)
+        assert(markerView.accessibilityPerformPress() && markerView.isAccessibilitySelected())
+        assert(markerView.menu(for: backgroundEvent) == nil, "The marker must not expose spacer deletion or width controls")
+        assert(strip.itemViews.filter(\.isInsertionMarker).count == 1)
+        print("Modern layout: fallback icons, app badges, hit testing, selection accessibility, single row, stable views and background drag rejection passed")
+        print("Insertion marker: one row, fixed geometry, bilingual two-line rendering, label hit testing, selection and distinct spacer behavior passed")
+    }
+}

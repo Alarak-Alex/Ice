@@ -21,7 +21,6 @@ struct LayoutBar: View {
     }
 
     @EnvironmentObject var appState: AppState
-    @EnvironmentObject var imageCache: MenuBarItemImageCache
 
     let section: MenuBarSection
     let spacing: CGFloat
@@ -40,7 +39,7 @@ struct LayoutBar: View {
     }
 
     var body: some View {
-        conditionalBody
+        Representable(appState: appState, section: section, spacing: spacing)
             .frame(height: 50)
             .frame(maxWidth: .infinity)
             .layoutBarStyle(appState: appState, averageColorInfo: menuBarManager.averageColorInfo)
@@ -51,13 +50,4 @@ struct LayoutBar: View {
             }
     }
 
-    @ViewBuilder
-    private var conditionalBody: some View {
-        if imageCache.cacheFailed(for: section.name) {
-            Text("Unable to display menu bar items")
-                .foregroundStyle(menuBarManager.averageColorInfo?.color.brightness ?? 0 > 0.67 ? .black : .white)
-        } else {
-            Representable(appState: appState, section: section, spacing: spacing)
-        }
-    }
 }

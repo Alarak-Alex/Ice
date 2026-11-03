@@ -39,14 +39,12 @@ final class LayoutBarContainer: NSView {
     /// After each layout pass, this value is reset to `true`.
     var shouldAnimateNextLayoutPass = true
 
-    /// A Boolean value that indicates whether the container can
-    /// set its arranged views.
-    var canSetArrangedViews = true
-
     /// The amount of space between each arranged view.
     var spacing: CGFloat {
         didSet {
-            layoutArrangedViews()
+            if spacing != oldValue {
+                layoutArrangedViews()
+            }
         }
     }
 
@@ -89,22 +87,11 @@ final class LayoutBarContainer: NSView {
 
         if let appState {
             appState.itemManager.$itemCache
-                .removeDuplicates()
                 .sink { [weak self] cache in
                     guard let self else {
                         return
                     }
                     setArrangedViews(items: cache.managedItems(for: section.name))
-                }
-                .store(in: &c)
-
-            appState.imageCache.$images
-                .removeDuplicates()
-                .sink { [weak self] _ in
-                    guard let self else {
-                        return
-                    }
-                    layoutArrangedViews()
                 }
                 .store(in: &c)
         }
@@ -134,9 +121,7 @@ final class LayoutBarContainer: NSView {
             view.hasContainer = false
         }
 
-        // retain the previous view on each iteration; use its frame
-        // to calculate the x coordinate of the next view's origin
-        var previous: NSView?
+        var nextX: CGFloat = 0
 
         // get the max height of all arranged views to calculate the
         // y coordinate of each view's origin
@@ -144,48 +129,40 @@ final class LayoutBarContainer: NSView {
             .map { $0.bounds.height }
             .max() ?? 0
 
-        for var view in arrangedViews {
-            if subviews.contains(view) {
-                // view already exists inside the layout view, but may
-                // have moved from its previous location;
-                if shouldAnimateNextLayoutPass {
-                    // replace the view with its animator proxy
-                    view = view.animator()
-                }
-            } else {
-                // view does not already exist inside the layout view;
-                // add it as a subview
+        for view in arrangedViews {
+            let origin = CGPoint(
+                x: nextX,
+                y: (maxHeight / 2) - view.bounds.midY
+            )
+            let isExistingView = view.superview === self
+            if !isExistingView {
                 addSubview(view)
                 view.hasContainer = true
             }
-
-            // set the view's origin; if the view is an animator proxy,
-            // it will animate to the new position; otherwise, it must
-            // be a newly added view
-            view.setFrameOrigin(
-                CGPoint(
-                    x: previous.map { $0.frame.maxX + spacing } ?? 0,
-                    y: (maxHeight / 2) - view.bounds.midY
-                )
-            )
-
-            previous = view // retain the view
+            if isExistingView, shouldAnimateNextLayoutPass,
+               !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+               view.frame.origin != origin {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.12
+                    view.animator().setFrameOrigin(origin)
+                }
+            } else {
+                view.setFrameOrigin(origin)
+            }
+            nextX += view.bounds.width + spacing
         }
 
         // update the width and height constraints using the information
         // collected while iterating
-        widthConstraint.constant = previous?.frame.maxX ?? 0
+        widthConstraint.constant = max(0, nextX - spacing)
         heightConstraint.constant = maxHeight
     }
 
     /// Sets the container's arranged views with the given items.
-    ///
-    /// - Note: If the value of the container's ``canSetArrangedViews``
-    ///   property is `false`, this function returns early.
     func setArrangedViews(items: [MenuBarItem]?) {
         guard
             let appState,
-            canSetArrangedViews
+            !appState.navigationState.isLayoutDragging
         else {
             return
         }
@@ -195,12 +172,17 @@ final class LayoutBarContainer: NSView {
         }
         var newViews = [LayoutBarItemView]()
         for item in items {
-            if let existingView = arrangedViews.first(where: { $0.item == item }) {
+            if let existingView = arrangedViews.first(where: { $0.item.windowID == item.windowID }) {
+                existingView.item = item
                 newViews.append(existingView)
             } else {
                 let view = LayoutBarItemView(appState: appState, item: item)
                 newViews.append(view)
             }
+        }
+
+        guard !newViews.elementsEqual(arrangedViews, by: { $0 === $1 }) else {
+            return
         }
         arrangedViews = newViews
     }
@@ -239,7 +221,7 @@ final class LayoutBarContainer: NSView {
             }
             // updating normally relies on the presence of other arranged views,
             // but if the container is empty, it needs to be handled separately
-            guard !arrangedViews.filter({ $0.isEnabled }).isEmpty else {
+            guard arrangedViews.contains(where: { $0.isEnabled }) else {
                 arrangedViews.insert(sourceView, at: 0)
                 return .move
             }
@@ -250,8 +232,6 @@ final class LayoutBarContainer: NSView {
                 destinationView !== sourceView,
                 // don't rearrange if destination is disabled
                 destinationView.isEnabled,
-                // don't rearrange if in the middle of an animation
-                destinationView.layer?.animationKeys() == nil,
                 let destinationIndex = arrangedViews.firstIndex(of: destinationView)
             else {
                 return .move

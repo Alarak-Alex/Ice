@@ -3,11 +3,11 @@
 //  Ice
 //
 
-import LaunchAtLogin
 import SwiftUI
 
 struct GeneralSettingsPane: View {
     @EnvironmentObject var appState: AppState
+    @AppStorage("IceLanguage") private var language = AppLanguage.system.rawValue
     @State private var isImportingCustomIceIcon = false
     @State private var isPresentingError = false
     @State private var presentedError: LocalizedErrorWrapper?
@@ -36,11 +36,10 @@ struct GeneralSettingsPane: View {
     }
 
     private var rehideIntervalKey: LocalizedStringKey {
-        let formatted = manager.rehideInterval.formatted()
         if manager.rehideInterval == 1 {
-            return LocalizedStringKey(formatted + " second")
+            return "\(manager.rehideInterval.formatted()) second"
         } else {
-            return LocalizedStringKey(formatted + " seconds")
+            return "\(manager.rehideInterval.formatted()) seconds"
         }
     }
 
@@ -53,26 +52,30 @@ struct GeneralSettingsPane: View {
     }
 
     var body: some View {
-        IceForm {
-            IceSection {
+        IceForm(alignment: .leading, spacing: 24) {
+            SettingsPaneHeader(title: "General", subtitle: "Configure Ice, menu bar behavior and permissions.", systemImage: "gearshape.fill", tint: .gray)
+            IceSection("Application") {
+                languagePicker
                 launchAtLogin
             }
-            IceSection {
+            IceSection("Menu Bar Icon") {
                 iceIconOptions
             }
-            IceSection {
+            IceSection("Ice Bar") {
                 iceBarOptions
             }
-            IceSection {
+            IceSection("Interactions") {
                 showOnClick
                 showOnHover
                 showOnScroll
             }
-            IceSection {
+            IceSection("Auto-hide") {
                 autoRehideOptions
             }
-            IceSection {
-                spacingOptions
+            if #unavailable(macOS 27.0) {
+                IceSection("Spacing") {
+                    spacingOptions
+                }
             }
         }
         .alert(isPresented: $isPresentingError, error: presentedError) {
@@ -84,14 +87,42 @@ struct GeneralSettingsPane: View {
     }
 
     @ViewBuilder
+    private var languagePicker: some View {
+        IcePicker("Language", selection: selectedLanguage) {
+            ForEach(AppLanguage.allCases) { language in
+                languageLabel(language).tag(language)
+            }
+        }
+    }
+
+    private var selectedLanguage: Binding<AppLanguage> {
+        Binding(
+            get: { AppLanguage(rawValue: language) ?? .system },
+            set: { language = $0.rawValue }
+        )
+    }
+
+    @ViewBuilder
+    private func languageLabel(_ language: AppLanguage) -> some View {
+        switch language {
+        case .system:
+            Text("System Default")
+        case .english:
+            Text("English")
+        case .simplifiedChinese:
+            Text("简体中文")
+        }
+    }
+
+    @ViewBuilder
     private var launchAtLogin: some View {
-        LaunchAtLogin.Toggle()
+        LaunchAtLoginSettingsRow()
     }
 
     @ViewBuilder
     private func menuItem(for imageSet: ControlItemImageSet) -> some View {
         Label {
-            Text(imageSet.name.rawValue)
+            Text(LocalizedStringKey(imageSet.name.rawValue))
         } icon: {
             if let nsImage = imageSet.hidden.nsImage(for: appState) {
                 switch imageSet.name {

@@ -85,13 +85,11 @@ final class LayoutBarPaddingView: NSView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        defer {
-            DispatchQueue.main.async {
-                self.container.canSetArrangedViews = true
-            }
+        guard let draggingSource = sender.draggingSource as? LayoutBarItemView else {
+            return false
         }
 
-        guard let draggingSource = sender.draggingSource as? LayoutBarItemView else {
+        guard arrangedViews.contains(draggingSource) else {
             return false
         }
 
@@ -101,14 +99,15 @@ final class LayoutBarPaddingView: NSView {
                 // need to find a target item
                 let items = MenuBarItem.getMenuBarItems(onScreenOnly: false, activeSpaceOnly: true)
                 let targetItem: MenuBarItem? = switch section.name {
-                case .visible: nil // visible section always has more than 1 item
+                case .visible: items.first { $0.info == .hiddenControlItem }
                 case .hidden: items.first { $0.info == .hiddenControlItem }
                 case .alwaysHidden: items.first { $0.info == .alwaysHiddenControlItem }
                 }
                 if let targetItem {
-                    move(item: draggingSource.item, to: .leftOfItem(targetItem))
+                    move(item: draggingSource.item, to: section.name == .visible ? .rightOfItem(targetItem) : .leftOfItem(targetItem))
                 } else {
                     Logger.layoutBar.error("No target item for layout bar drag")
+                    return false
                 }
             } else if arrangedViews.indices.contains(index + 1) {
                 // we have a view to the right of the dragging source
@@ -129,15 +128,20 @@ final class LayoutBarPaddingView: NSView {
             return
         }
         Task {
-            try await Task.sleep(for: .milliseconds(25))
             do {
+                try await Task.sleep(for: .milliseconds(25))
                 try await appState.itemManager.slowMove(item: item, to: destination)
                 appState.itemManager.removeTempShownItemFromCache(with: item.info)
             } catch {
                 Logger.layoutBar.error("Error moving menu bar item: \(error)")
                 let alert = NSAlert(error: error)
-                alert.runModal()
+                if let window {
+                    alert.beginSheetModal(for: window) { _ in }
+                } else {
+                    alert.runModal()
+                }
             }
+            await appState.itemManager.cacheItemsIfNeeded(force: true)
         }
     }
 }

@@ -36,7 +36,7 @@ struct AboutSettingsPane: View {
         if let date = updatesManager.lastUpdateCheckDate {
             date.formatted(date: .abbreviated, time: .standard)
         } else {
-            "Never"
+            AppLanguage.localized("Never")
         }
     }
 
@@ -74,16 +74,16 @@ struct AboutSettingsPane: View {
                     Image(nsImage: nsImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 225)
+                        .frame(width: 112)
                 }
 
                 VStack(alignment: .leading) {
                     Text("Ice")
-                        .font(.system(size: 72, weight: .medium))
+                        .font(.system(size: 40, weight: .semibold))
                         .foregroundStyle(.primary)
 
                     Text("Version \(Constants.versionString)")
-                        .font(.system(size: 18))
+                        .font(.body)
                         .foregroundStyle(.secondary)
 
                     Text(Constants.copyrightString)

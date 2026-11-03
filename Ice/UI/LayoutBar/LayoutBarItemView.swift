@@ -15,7 +15,14 @@ final class LayoutBarItemView: NSView {
     private var cancellables = Set<AnyCancellable>()
 
     /// The item that the view represents.
-    let item: MenuBarItem
+    var item: MenuBarItem {
+        didSet {
+            toolTip = item.displayName
+            isEnabled = item.isMovable
+            isUnresponsive = Bridging.responsivity(for: item.ownerPID) == .unresponsive
+            setAccessibilityLabel(item.displayName)
+        }
+    }
 
     /// Temporary information that the item view retains when it is moved outside
     /// of a layout view.
@@ -33,22 +40,9 @@ final class LayoutBarItemView: NSView {
 
     /// The image displayed inside the view.
     private var image: NSImage? {
-        didSet {
-            if
-                let image,
-                let screen = appState?.imageCache.screen
-            {
-                let size = CGSize(
-                    width: image.size.width / screen.backingScaleFactor,
-                    height: image.size.height / screen.backingScaleFactor
-                )
-                setFrameSize(size)
-            } else {
-                setFrameSize(.zero)
-            }
-            needsDisplay = true
-        }
+        didSet { needsDisplay = true }
     }
+    private var isUnresponsive = false
 
     /// A Boolean value that indicates whether the item view is a dragging placeholder.
     ///
@@ -72,11 +66,16 @@ final class LayoutBarItemView: NSView {
         self.appState = appState
 
         // set the frame to the full item frame size; the image will be centered when displayed
-        super.init(frame: CGRect(origin: .zero, size: item.frame.size))
+        super.init(frame: CGRect(x: 0, y: 0, width: max(item.frame.width, 24), height: 26))
         unregisterDraggedTypes()
 
         self.toolTip = item.displayName
         self.isEnabled = item.isMovable
+        self.isUnresponsive = Bridging.responsivity(for: item.ownerPID) == .unresponsive
+        self.image = item.owningApplication?.icon ?? NSImage(systemSymbolName: "questionmark.square", accessibilityDescription: item.displayName)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
+        setAccessibilityLabel(item.displayName)
 
         configureCancellables()
     }
@@ -94,7 +93,7 @@ final class LayoutBarItemView: NSView {
                 .sink { [weak self] images in
                     guard
                         let self,
-                        let cgImage = images[item.info]
+                        let cgImage = images[self.item.info]
                     else {
                         return
                     }
@@ -109,42 +108,32 @@ final class LayoutBarItemView: NSView {
     /// Provides an alert to display when the item view is disabled.
     func provideAlertForDisabledItem() -> NSAlert {
         let alert = NSAlert()
-        alert.messageText = "Menu bar item is not movable."
-        alert.informativeText = "macOS prohibits \"\(item.displayName)\" from being moved."
+        alert.messageText = AppLanguage.localized("Menu bar item is not movable.")
+        alert.informativeText = AppLanguage.localized("macOS prohibits \"\(item.displayName)\" from being moved.")
         return alert
     }
 
     /// Provides an alert to display when a menu bar item is unresponsive.
     func provideAlertForUnresponsiveItem() -> NSAlert {
         let alert = provideAlertForDisabledItem()
-        alert.informativeText = "\(item.displayName) is unresponsive. Until it is restarted, it cannot be moved. Movement of other menu bar items may also be affected until this is resolved."
+        alert.informativeText = AppLanguage.localized("\(item.displayName) is unresponsive. Until it is restarted, it cannot be moved. Movement of other menu bar items may also be affected until this is resolved.")
         return alert
     }
 
     override func draw(_ dirtyRect: NSRect) {
         if !isDraggingPlaceholder {
-            image?.draw(
-                in: bounds,
-                from: .zero,
-                operation: .sourceOver,
-                fraction: isEnabled ? 1.0 : 0.67
-            )
-            if Bridging.responsivity(for: item.ownerPID) == .unresponsive {
-                let warningImage = NSImage.warning
-                let width: CGFloat = 15
-                let scale = width / warningImage.size.width
-                let size = CGSize(
-                    width: width,
-                    height: warningImage.size.height * scale
+            if let image, image.size.width > 0, image.size.height > 0 {
+                let scale = min(bounds.width / image.size.width, bounds.height / image.size.height)
+                let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+                image.draw(
+                    in: CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width, height: size.height),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: isEnabled ? 1.0 : 0.67
                 )
-                warningImage.draw(
-                    in: CGRect(
-                        x: bounds.maxX - size.width,
-                        y: bounds.minY,
-                        width: size.width,
-                        height: size.height
-                    )
-                )
+            }
+            if isUnresponsive {
+                NSImage.warning.draw(in: CGRect(x: bounds.maxX - 12, y: 0, width: 12, height: 12))
             }
         }
     }
@@ -186,23 +175,31 @@ extension LayoutBarItemView: NSDraggingSource {
     func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
         // make sure the container doesn't update its arranged views and that items
         // aren't arranged during a dragging session
-        if let container = superview as? LayoutBarContainer {
-            container.canSetArrangedViews = false
+        if let container = superview as? LayoutBarContainer,
+           let index = container.arrangedViews.firstIndex(of: self) {
+            oldContainerInfo = (container, index)
         }
+        appState?.navigationState.isLayoutDragging = true
 
         // prevent the dragging image from animating back to its original location
         session.animatesToStartingPositionsOnCancelOrFail = false
 
         // async to prevent the view from disappearing before the dragging image appears
         DispatchQueue.main.async {
-            self.isDraggingPlaceholder = true
+            if self.appState?.navigationState.isLayoutDragging == true {
+                self.isDraggingPlaceholder = true
+            }
         }
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         defer {
+            appState?.navigationState.isLayoutDragging = false
             // always remove container info at the end of a session
             oldContainerInfo = nil
+            if operation.isEmpty {
+                Task { await appState?.itemManager.cacheItemsIfNeeded(force: true) }
+            }
         }
 
         // since the session's `animatesToStartingPositionsOnCancelOrFail` property was
@@ -214,12 +211,15 @@ extension LayoutBarItemView: NSDraggingSource {
 
         // if the drop occurs outside of a container, reinsert the view into its original
         // container at its original index
-        if !hasContainer {
+        if operation.isEmpty || !hasContainer {
             guard let (container, index) = oldContainerInfo else {
                 return
             }
+            if let currentContainer = superview as? LayoutBarContainer {
+                currentContainer.arrangedViews.removeAll { $0 === self }
+            }
             container.shouldAnimateNextLayoutPass = false
-            container.arrangedViews.insert(self, at: index)
+            container.arrangedViews.insert(self, at: min(index, container.arrangedViews.count))
         }
     }
 }

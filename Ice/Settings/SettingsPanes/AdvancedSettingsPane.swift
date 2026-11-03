@@ -18,16 +18,16 @@ struct AdvancedSettingsPane: View {
     }
 
     private func formattedToSeconds(_ interval: TimeInterval) -> LocalizedStringKey {
-        let formatted = interval.formatted()
         return if interval == 1 {
-            LocalizedStringKey(formatted + " second")
+            "\(interval.formatted()) second"
         } else {
-            LocalizedStringKey(formatted + " seconds")
+            "\(interval.formatted()) seconds"
         }
     }
 
     var body: some View {
         IceForm {
+            SettingsPaneHeader(title: "Advanced", subtitle: "Fine-tune menu bar behavior and permissions.", systemImage: "gearshape.2.fill")
             IceSection {
                 hideApplicationMenus
                 showSectionDividers
@@ -161,7 +161,7 @@ struct AdvancedSettingsPane: View {
                     }
                 }
             } label: {
-                Text(permission.title)
+                Text(LocalizedStringKey(permission.title))
             }
             .frame(height: 22)
         }

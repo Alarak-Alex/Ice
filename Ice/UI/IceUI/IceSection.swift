@@ -91,7 +91,8 @@ struct IceSection<Header: View, Content: View, Footer: View>: View {
     ) where Header == Text, Footer == EmptyView {
         self.init(spacing: spacing, options: options) {
             Text(title)
-                .font(.headline)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
         } content: {
             content()
         }

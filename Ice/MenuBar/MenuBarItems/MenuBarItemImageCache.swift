@@ -10,6 +10,7 @@ import Combine
 final class MenuBarItemImageCache: ObservableObject {
     /// The cached item images.
     @Published private(set) var images = [MenuBarItemInfo: CGImage]()
+    @MainActor private var isUpdatingCache = false
 
     /// The screen of the cached item images.
     private(set) var screen: NSScreen?
@@ -57,7 +58,7 @@ final class MenuBarItemImageCache: ObservableObject {
                     appState.itemManager.$itemCache.removeDuplicates().mapToVoid()
                 )
             )
-            .throttle(for: 0.5, scheduler: DispatchQueue.main, latest: false)
+            .throttle(for: 0.5, scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] in
                 guard let self else {
                     return
@@ -190,18 +191,23 @@ final class MenuBarItemImageCache: ObservableObject {
     }
 
     /// Updates the cache for the given sections, without checking whether caching is necessary.
+    @MainActor
     func updateCacheWithoutChecks(sections: [MenuBarSection.Name]) async {
         guard
             let appState,
-            let screen = NSScreen.main
+            let screen = NSScreen.main,
+            !isUpdatingCache,
+            !appState.navigationState.isLayoutDragging
         else {
             return
         }
+        isUpdatingCache = true
+        defer { isUpdatingCache = false }
 
         var newImages = [MenuBarItemInfo: CGImage]()
 
         for section in sections {
-            guard await !appState.itemManager.itemCache[section].isEmpty else {
+            guard !appState.itemManager.itemCache[section].isEmpty else {
                 continue
             }
             let sectionImages = await createImages(for: section, screen: screen)
@@ -212,12 +218,9 @@ final class MenuBarItemImageCache: ObservableObject {
             newImages.merge(sectionImages) { (_, new) in new }
         }
 
-        await MainActor.run { [newImages] in
-            images.merge(newImages) { (_, new) in new }
-        }
-
         self.screen = screen
         self.menuBarHeight = screen.getMenuBarHeight()
+        images.merge(newImages) { (_, new) in new }
     }
 
     /// Updates the cache for the given sections, if necessary.

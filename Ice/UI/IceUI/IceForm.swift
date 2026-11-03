@@ -7,7 +7,6 @@ import SwiftUI
 
 struct IceForm<Content: View>: View {
     @Environment(\.isScrollEnabled) private var isScrollEnabled
-    @State private var contentFrame = CGRect.zero
 
     private let alignment: HorizontalAlignment
     private let padding: EdgeInsets
@@ -43,16 +42,11 @@ struct IceForm<Content: View>: View {
 
     var body: some View {
         if isScrollEnabled {
-            GeometryReader { geometry in
-                if contentFrame.height > geometry.size.height {
-                    ScrollView {
-                        contentStack
-                    }
-                    .scrollContentBackground(.hidden)
-                } else {
-                    contentStack
-                }
+            ScrollView {
+                contentStack
             }
+            .scrollContentBackground(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
         } else {
             contentStack
         }
@@ -64,8 +58,8 @@ struct IceForm<Content: View>: View {
             content
                 .toggleStyle(IceFormToggleStyle())
         }
+        .frame(maxWidth: .infinity)
         .padding(padding)
-        .onFrameChange(update: $contentFrame)
     }
 }
 
@@ -77,7 +71,7 @@ private struct IceFormToggleStyle: ToggleStyle {
             }
             .labelsHidden()
             .toggleStyle(.switch)
-            .controlSize(.mini)
+            .controlSize(.small)
         } label: {
             configuration.label
         }

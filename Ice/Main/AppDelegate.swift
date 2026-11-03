@@ -65,7 +65,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        if #available(macOS 27.0, *) {
+            appState?.modernMenuBarLayout.restoreTemporaryVisibility()
+        }
+    }
+
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+        return true
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openSettingsWindow()
         return true
     }
 

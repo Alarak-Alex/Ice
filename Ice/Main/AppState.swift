@@ -38,6 +38,7 @@ final class AppState: ObservableObject {
 
     /// Global cache for menu bar item images.
     private(set) lazy var imageCache = MenuBarItemImageCache(appState: self)
+    private(set) lazy var modernMenuBarLayout = ModernMenuBarLayoutModel(appState: self, spacerManager: MenuBarSpacerManager())
 
     /// Manager for menu bar item spacing.
     let spacingManager = MenuBarItemSpacingManager()
@@ -56,6 +57,9 @@ final class AppState: ObservableObject {
 
     /// The window that contains the permissions interface.
     private(set) weak var permissionsWindow: NSWindow?
+
+    private var settingsWindowNeedsFocus = false
+    private var permissionsWindowNeedsFocus = false
 
     /// A Boolean value that indicates whether the "ShowOnHover" feature is prevented.
     private(set) var isShowOnHoverPrevented = false
@@ -189,6 +193,7 @@ final class AppState: ObservableObject {
         imageCache.performSetup()
         updatesManager.performSetup()
         userNotificationManager.performSetup()
+        if #available(macOS 27.0, *) { _ = modernMenuBarLayout }
     }
 
     /// Assigns the app delegate to the app state.
@@ -208,6 +213,9 @@ final class AppState: ObservableObject {
         }
         settingsWindow = window
         configureCancellables()
+        if settingsWindowNeedsFocus {
+            focusSettingsWindow()
+        }
     }
 
     /// Assigns the permissions window to the app state.
@@ -218,17 +226,30 @@ final class AppState: ObservableObject {
         }
         permissionsWindow = window
         configureCancellables()
+        if permissionsWindowNeedsFocus {
+            focusPermissionsWindow()
+        }
     }
 
     /// Opens the settings window.
     func openSettingsWindow() {
+        settingsWindowNeedsFocus = true
         with(EnvironmentValues()) { environment in
             environment.openWindow(id: Constants.settingsWindowID)
         }
+        focusSettingsWindow()
+    }
+
+    private func focusSettingsWindow() {
+        guard let settingsWindow else { return }
+        activate(withPolicy: .regular)
+        settingsWindow.makeKeyAndOrderFront(nil)
+        settingsWindowNeedsFocus = false
     }
 
     /// Dismisses the settings window.
     func dismissSettingsWindow() {
+        settingsWindowNeedsFocus = false
         with(EnvironmentValues()) { environment in
             environment.dismissWindow(id: Constants.settingsWindowID)
         }
@@ -236,13 +257,23 @@ final class AppState: ObservableObject {
 
     /// Opens the permissions window.
     func openPermissionsWindow() {
+        permissionsWindowNeedsFocus = true
         with(EnvironmentValues()) { environment in
             environment.openWindow(id: Constants.permissionsWindowID)
         }
+        focusPermissionsWindow()
+    }
+
+    private func focusPermissionsWindow() {
+        guard let permissionsWindow else { return }
+        activate(withPolicy: .regular)
+        permissionsWindow.makeKeyAndOrderFront(nil)
+        permissionsWindowNeedsFocus = false
     }
 
     /// Dismisses the permissions window.
     func dismissPermissionsWindow() {
+        permissionsWindowNeedsFocus = false
         with(EnvironmentValues()) { environment in
             environment.dismissWindow(id: Constants.permissionsWindowID)
         }
@@ -250,32 +281,9 @@ final class AppState: ObservableObject {
 
     /// Activates the app and sets its activation policy to the given value.
     func activate(withPolicy policy: NSApplication.ActivationPolicy) {
-        // Store whether the app has previously activated inside an internal
-        // context to keep it isolated.
-        enum Context {
-            static let hasActivated = ObjectStorage<Bool>()
-        }
-
-        func activate() {
-            if let frontApp = NSWorkspace.shared.frontmostApplication {
-                NSRunningApplication.current.activate(from: frontApp)
-            } else {
-                NSApp.activate()
-            }
-            NSApp.setActivationPolicy(policy)
-        }
-
-        if Context.hasActivated.value(for: self) == true {
-            activate()
-        } else {
-            Context.hasActivated.set(true, for: self)
-            Logger.appState.debug("First time activating app, so going through Dock")
-            // Hack to make sure the app properly activates for the first time.
-            NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.activate()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                activate()
-            }
-        }
+        NSApp.setActivationPolicy(policy)
+        // Explicit window/menu requests must work while another app owns focus.
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Deactivates the app and sets its activation policy to the given value.

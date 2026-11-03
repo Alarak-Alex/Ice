@@ -7,33 +7,10 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var navigationState: AppNavigationState
-    @Environment(\.sidebarRowSize) var sidebarRowSize
+    @AppStorage("IceLanguage") private var language = AppLanguage.system.rawValue
 
-    private var sidebarWidth: CGFloat {
-        switch sidebarRowSize {
-        case .small: 190
-        case .medium: 210
-        case .large: 230
-        @unknown default: 210
-        }
-    }
-
-    private var sidebarItemHeight: CGFloat {
-        switch sidebarRowSize {
-        case .small: 26
-        case .medium: 32
-        case .large: 34
-        @unknown default: 32
-        }
-    }
-
-    private var sidebarItemFontSize: CGFloat {
-        switch sidebarRowSize {
-        case .small: 13
-        case .medium: 15
-        case .large: 16
-        @unknown default: 15
-        }
+    private var locale: Locale {
+        AppLanguage(rawValue: language)?.locale ?? Locale.current
     }
 
     var body: some View {
@@ -41,28 +18,61 @@ struct SettingsView: View {
             sidebar
         } detail: {
             detailView
+                .background(Color(nsColor: .windowBackgroundColor))
         }
         .navigationTitle(navigationState.settingsNavigationIdentifier.localized)
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button(action: navigationState.goBack) {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(!navigationState.canGoBack)
+                .keyboardShortcut("[", modifiers: .command)
+                .help("Back")
+
+                Button(action: navigationState.goForward) {
+                    Label("Forward", systemImage: "chevron.right")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(!navigationState.canGoForward)
+                .keyboardShortcut("]", modifiers: .command)
+                .help("Forward")
+            }
+
+            if navigationState.settingsNavigationIdentifier == .menuBarLayout {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        NotificationCenter.default.post(name: Notification.Name("IceMenuBarSearchRequested"), object: nil)
+                    } label: {
+                        Label("Search Menu Bar Items", systemImage: "magnifyingglass")
+                    }
+                    .labelStyle(.iconOnly)
+                    .keyboardShortcut("f", modifiers: .command)
+                    .help("Search Menu Bar Items")
+
+                    Button {
+                        NotificationCenter.default.post(name: Notification.Name("IceMenuBarRefreshRequested"), object: nil)
+                    } label: {
+                        Label("Refresh Menu Bar Items", systemImage: "arrow.clockwise")
+                    }
+                    .labelStyle(.iconOnly)
+                    .keyboardShortcut("r", modifiers: .command)
+                    .help("Refresh Menu Bar Items")
+                }
+            }
+        }
+        .environment(\.locale, locale)
+        .id(language)
     }
 
     @ViewBuilder
     private var sidebar: some View {
-        List(selection: $navigationState.settingsNavigationIdentifier) {
-            Section {
-                ForEach(SettingsNavigationIdentifier.allCases, id: \.self) { identifier in
-                    sidebarItem(for: identifier)
-                }
-            } header: {
-                Text("Ice")
-                    .font(.system(size: 36, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .padding(.vertical, 5)
-            }
-            .collapsible(false)
+        SettingsSidebar(selection: navigationState.settingsNavigationIdentifier, language: language) { identifier in
+            navigationState.settingsNavigationIdentifier = identifier
         }
-        .scrollDisabled(true)
         .removeSidebarToggle()
-        .navigationSplitViewColumnWidth(sidebarWidth)
+        .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 240)
     }
 
     @ViewBuilder
@@ -83,26 +93,4 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func sidebarItem(for identifier: SettingsNavigationIdentifier) -> some View {
-        Label {
-            Text(identifier.localized)
-                .font(.system(size: sidebarItemFontSize))
-                .padding(.leading, 2)
-        } icon: {
-            icon(for: identifier).view
-        }
-        .frame(height: sidebarItemHeight)
-    }
-
-    private func icon(for identifier: SettingsNavigationIdentifier) -> IconResource {
-        switch identifier {
-        case .general: .systemSymbol("gearshape")
-        case .menuBarLayout: .systemSymbol("rectangle.topthird.inset.filled")
-        case .menuBarAppearance: .systemSymbol("swatchpalette")
-        case .hotkeys: .systemSymbol("keyboard")
-        case .advanced: .systemSymbol("gearshape.2")
-        case .about: .assetCatalog(.iceCubeStroke)
-        }
-    }
 }
