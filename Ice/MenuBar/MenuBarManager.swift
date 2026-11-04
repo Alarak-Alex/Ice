@@ -43,7 +43,9 @@ final class MenuBarManager: ObservableObject {
     /// A Boolean value that indicates whether the manager can update its stored
     /// information for the menu bar's average color.
     private var canUpdateAverageColorInfo: Bool {
-        appState?.settingsWindow?.isVisible == true
+        // The macOS 27 layout uses its own background and never consumes this capture.
+        if #available(macOS 27.0, *) { return false }
+        return appState?.settingsWindow?.isVisible == true
     }
 
     /// Initializes a new menu bar manager instance.

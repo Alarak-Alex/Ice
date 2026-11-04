@@ -31,7 +31,7 @@ for macOS 27.
 ## Changes in this fork
 
 The English and Chinese READMEs describe the same development stage, updated
-November 3, 2026.
+November 4, 2026.
 
 - **Settings and navigation:** native AppKit search and sidebar selection,
   separate click targets, keyboard navigation, back/forward history, unified
@@ -67,7 +67,17 @@ November 3, 2026.
 - **Performance and lifetime fixes:** tracking monitors observe the event queue
   without draining and reposting it, pending events are deduplicated, cancelled
   subscriptions release subscribers, and departed items leave the resident
-  image cache while remaining available on disk.
+  image cache while remaining available on disk. Unchanged background scans
+  no longer invalidate the settings interface. Layout strips reuse app icons
+  per process, load them only when displayed, release departed icons, and skip
+  identical image/layout updates. Application-list notifications are coalesced,
+  and discovery reuses process metadata instead of querying Launch Services
+  every scan. Departed process metadata is released and restarted apps are
+  reloaded. Closed Settings windows unmount their content and restore the
+  selected pane when reopened. The macOS 27 editor skips unused background-color
+  captures, and the legacy capture path now releases its temporary window-list
+  buffer on every exit. The five-second discovery fallback remains active for
+  delayed status items and automatic display profiles.
 - **Build and startup:** launch-at-login error feedback, vendored CompactSlider
   compatibility fixes, and a signed local installation script.
 
@@ -91,9 +101,12 @@ placement, physical blank-space reveal, multiple-display behavior, and macOS 26
 runtime parity remain unverified.
 
 Performance samples no longer show the former tracking-loop hotspot. Local
-leak snapshots still report allocations without conclusive ownership stacks;
-this stage does **not** establish zero leaks, long-term memory stability, or a
-controlled overall CPU improvement.
+sampling on November 4, 2026 with Settings closed averaged 0.66% CPU over
+120 seconds, peaked at 8.3%, and ended at an 86.3 MiB physical footprint.
+Desktop activity was not controlled, so these observations do not establish an
+overall CPU reduction. A leak snapshot still reported 60 allocations / 3,008
+bytes associated with AppKit toolbar accessibility actions. This stage does
+**not** establish zero leaks or long-term memory stability.
 
 ## Install
 

@@ -62,6 +62,7 @@ enum ScreenCapture {
     ///   - option: Options that specify the image to be captured.
     static func captureWindows(_ windowIDs: [CGWindowID], screenBounds: CGRect? = nil, option: CGWindowImageOption = []) -> CGImage? {
         let pointer = UnsafeMutablePointer<UnsafeRawPointer?>.allocate(capacity: windowIDs.count)
+        defer { pointer.deallocate() }
         for (index, windowID) in windowIDs.enumerated() {
             pointer[index] = UnsafeRawPointer(bitPattern: UInt(windowID))
         }

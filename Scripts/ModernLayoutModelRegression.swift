@@ -1,11 +1,22 @@
 // Compile with the modern model, discovery, identity, profile, language and preference stores.
 import Cocoa
+import Combine
 
 enum Constants { static let bundleIdentifier = "com.jordanbaird.Ice.Regression" }
 extension NSScreen {
     var displayID: CGDirectDisplayID { deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as! CGDirectDisplayID }
 }
 @MainActor final class AppState { }
+
+// This fixture is accessed only by the main-actor regression below.
+private final class FixtureApplication: NSRunningApplication, @unchecked Sendable {
+    var reads = 0
+    var fixtureBundleID: String? = "com.example.fixture"
+    var fixtureName = "Fixture"
+    override var bundleIdentifier: String? { reads += 1; return fixtureBundleID }
+    override var processIdentifier: pid_t { reads += 1; return 9999 }
+    override var localizedName: String? { reads += 1; return fixtureName }
+}
 
 // Simulates MenuBarAgent registration using only the test's temporary preferences.
 @MainActor final class FixtureSpacers: MenuBarSpacerManaging {
@@ -37,6 +48,29 @@ extension NSScreen {
 struct ModernLayoutModelRegression {
     @MainActor static func main() async throws {
         _ = NSApplication.shared
+        var applicationCache = ModernMenuBarDiscovery.ApplicationCache()
+        var application: FixtureApplication? = FixtureApplication()
+        weak var cachedApplication = application
+        assert(applicationCache.applications([application!]).first?.name == "Fixture")
+        assert(application!.reads == 3)
+        assert(applicationCache.applications([application!]).first?.pid == 9999)
+        assert(application!.reads == 3, "Unchanged app objects must not query Launch Services again")
+        application = nil
+        assert(cachedApplication != nil, "Cached metadata must retain its process identity")
+        assert(applicationCache.applications([]).isEmpty)
+        assert(cachedApplication == nil, "Departed applications must leave the metadata cache")
+        let restarted = FixtureApplication()
+        restarted.fixtureName = "Restarted"
+        assert(applicationCache.applications([restarted]).first?.name == "Restarted" && restarted.reads == 3,
+               "A new process object, even with the same PID, must load fresh metadata")
+        let starting = FixtureApplication()
+        starting.fixtureBundleID = nil
+        assert(applicationCache.applications([starting]).isEmpty)
+        starting.fixtureBundleID = "com.example.ready"
+        assert(applicationCache.applications([starting]).first?.bundleID == "com.example.ready",
+               "Unavailable application metadata must be retried")
+        print("Application metadata: unchanged reads skipped, departures released, PID reuse and startup retry passed")
+
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ice-model-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -127,6 +161,27 @@ struct ModernLayoutModelRegression {
         }
         await model.refresh()
         assert(model.canEdit && model.entries.count == 3)
+
+        var refreshPublications = 0
+        let refreshObservation = model.objectWillChange.sink { refreshPublications += 1 }
+        for _ in 0..<3 { await model.refresh(captureImages: false) }
+        assert(refreshPublications == 0, "Unchanged background scans must not invalidate the settings interface")
+        try visibility.setAllowed(false, for: "com.example.1", replacing: true)
+        await model.refresh(captureImages: false)
+        assert(refreshPublications > 0, "Approval changes must publish even when discovered entries are unchanged")
+        try visibility.setAllowed(true, for: "com.example.1", replacing: false)
+        await model.refresh(captureImages: false)
+        refreshPublications = 0
+        var externalOrder = currentPositions()
+        externalOrder[keys[0]] = 100
+        externalOrder[keys[2]] = 300
+        try positions.save(externalOrder, replacing: currentPositions())
+        await model.refresh(captureImages: false)
+        assert(refreshPublications > 0 && model.entries.first?.id == keys[2],
+               "Suppressing redundant updates must still publish externally authored order changes")
+        try positions.save(initial, replacing: externalOrder)
+        await model.refresh(captureImages: false)
+        refreshObservation.cancel()
 
         let imageDirectory = root.appendingPathComponent("images")
         try FileManager.default.createDirectory(at: imageDirectory, withIntermediateDirectories: true)
@@ -514,6 +569,7 @@ struct ModernLayoutModelRegression {
         print("Recapture: temporary visibility restores on success, failure, cancellation and interrupted-capture recovery")
         print("Insertion: migration, independent marker movement, before/after drops, profile copy/undo, new-app order/visibility, persistence and idempotent scans passed")
         print("Background discovery: nonblocking editor state and stale scan rejection passed")
+        print("Incremental refresh: unchanged scans publish nothing; native order and approval changes remain observable")
         print("Image cache lifetime: departed images released, current images reused and disk images restored")
         print("Temporary reveal: Hidden only, unchanged Always Hidden, idempotence, authored layout preservation, restoration and edit cleanup passed")
         print("Spacer content: legacy decoding, text/symbol persistence, invalid symbol rejection, stable anchors and profile copy/undo passed")

@@ -15,6 +15,7 @@ struct SettingsNavigationRegression {
     static func main() {
         _ = NSApplication.shared
         let state = AppNavigationState()
+        state.isSettingsPresented = true
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 750),
                               styleMask: [.titled], backing: .buffered, defer: false)
         let host = NSHostingView(rootView: SettingsView().environmentObject(state).readWindow { _ in })
@@ -22,11 +23,11 @@ struct SettingsNavigationRegression {
         host.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: .now.addingTimeInterval(0.1))
 
-        func sidebar(in view: NSView) -> SettingsSidebarView? {
+        func findSidebar(in view: NSView) -> SettingsSidebarView? {
             if let sidebar = view as? SettingsSidebarView { return sidebar }
-            return view.subviews.lazy.compactMap { sidebar(in: $0) }.first
+            return view.subviews.lazy.compactMap { findSidebar(in: $0) }.first
         }
-        let sidebar = sidebar(in: host)!
+        let sidebar = findSidebar(in: host)!
         let table = sidebar.tableView
         assert(table.numberOfRows == SettingsNavigationIdentifier.allCases.count)
         assert(table.acceptsFirstMouse(for: nil))
@@ -64,5 +65,18 @@ struct SettingsNavigationRegression {
         sidebar.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
         assert(table.numberOfRows == 6 && table.selectedRow == 5)
         print("Settings sidebar: six native rows, isolated search hit area, first-mouse acceptance, navigation, history and filtering passed")
+
+        for _ in 0..<3 {
+            state.isSettingsPresented = false
+            RunLoop.main.run(until: .now.addingTimeInterval(0.1))
+            host.layoutSubtreeIfNeeded()
+            assert(findSidebar(in: host) == nil, "Closed settings must unmount their native view hierarchy")
+            state.isSettingsPresented = true
+            RunLoop.main.run(until: .now.addingTimeInterval(0.1))
+            host.layoutSubtreeIfNeeded()
+            assert(findSidebar(in: host)?.tableView.selectedRow == 5 && state.settingsNavigationIdentifier == .about,
+                   "Reopening settings must restore the selected pane")
+        }
+        print("Settings lifetime: close unmounts content; repeated reopening restores the selected pane")
     }
 }

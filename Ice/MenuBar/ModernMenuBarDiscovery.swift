@@ -1,7 +1,7 @@
 import ApplicationServices
 import Cocoa
 
-struct ModernMenuBarEntry: Identifiable {
+struct ModernMenuBarEntry: Identifiable, Equatable {
     static let insertionMarkerID = "new-item-insertion"
     var isInsertionMarker: Bool { id == Self.insertionMarkerID }
 
@@ -37,6 +37,29 @@ enum ModernMenuBarDiscovery {
         let pid: pid_t
         let bundleID: String
         let name: String
+    }
+
+    @MainActor
+    struct ApplicationCache {
+        private var cached = [ObjectIdentifier: (NSRunningApplication, Application)]()
+
+        mutating func applications(_ running: [NSRunningApplication]) -> [Application] {
+            var current = [ObjectIdentifier: (NSRunningApplication, Application)]()
+            let applications = running.compactMap { app -> Application? in
+                let id = ObjectIdentifier(app)
+                if let entry = cached[id] {
+                    current[id] = entry
+                    return entry.1
+                }
+                guard let bundleID = app.bundleIdentifier else { return nil }
+                let info = Application(pid: app.processIdentifier, bundleID: bundleID, name: app.localizedName ?? bundleID)
+                // Retaining the object prevents its identity from being reused by a later process.
+                current[id] = (app, info)
+                return info
+            }
+            cached = current
+            return applications
+        }
     }
 
     private struct Observation {

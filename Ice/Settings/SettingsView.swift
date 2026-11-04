@@ -14,6 +14,13 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        // Closed windows must not keep SwiftUI scroll prefetching alive.
+        if navigationState.isSettingsPresented {
+            settingsContent
+        }
+    }
+
+    private var settingsContent: some View {
         NavigationSplitView {
             sidebar
         } detail: {

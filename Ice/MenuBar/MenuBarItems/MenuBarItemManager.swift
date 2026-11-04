@@ -187,7 +187,8 @@ final class MenuBarItemManager: ObservableObject {
             .store(in: &c)
 
         NSWorkspace.shared.publisher(for: \.runningApplications)
-            .delay(for: 0.25, scheduler: DispatchQueue.main)
+            .removeDuplicates { $0.elementsEqual($1, by: { $0 === $1 }) }
+            .debounce(for: 0.25, scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else {
                     return

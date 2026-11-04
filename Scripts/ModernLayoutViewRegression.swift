@@ -58,6 +58,54 @@ struct ModernLayoutViewRegression {
                               pid: -1, frame: .zero, positionKey: "status:com.example.\(index)::Item-0",
                               identifier: "Item-0", nativeTitle: "", isVisible: true)
         }
+        var iconLoads = 0
+        weak var departedAppIcon: NSImage?
+        let cachedStrip = MenuBarLayoutItemStrip(frame: NSRect(x: 0, y: 0, width: 300, height: 76))
+        autoreleasepool {
+            let cachedEntries = (0..<3).map { index in
+                ModernMenuBarEntry(id: "cached-\(index)", name: "Cached \(index)", bundleID: "com.example.cached\(index / 2)",
+                                  pid: pid_t(8000 + index / 2), frame: .zero, positionKey: "status:cached-\(index)",
+                                  identifier: "", nativeTitle: "", isVisible: true)
+            }
+            cachedStrip.loadAppIcon = { _ in
+                iconLoads += 1
+                return NSImage(size: NSSize(width: 24, height: 24))
+            }
+            var images = Dictionary(uniqueKeysWithValues: cachedEntries.map { ($0.id, statusImage) })
+            cachedStrip.showAppIcons = false
+            assert(cachedStrip.update(entries: cachedEntries, images: images))
+            assert(iconLoads == 0, "Captured glyphs without app badges must not fetch application icons")
+            cachedStrip.layoutSubtreeIfNeeded()
+            assert(!cachedStrip.update(entries: cachedEntries, images: images),
+                   "Identical view updates must not request another layout")
+            cachedStrip.showAppIcons = true
+            assert(cachedStrip.update(entries: cachedEntries, images: images))
+            assert(iconLoads == 2, "Items from one process must share one cached application icon")
+            images[cachedEntries[0].id] = NSImage(size: NSSize(width: 60, height: 18))
+            assert(cachedStrip.update(entries: cachedEntries, images: images))
+            assert(iconLoads == 2 && cachedStrip.itemViews[0].icon.image === images[cachedEntries[0].id],
+                   "A fresh status glyph must update without reloading application icons")
+            cachedStrip.isEditable = true
+            assert(cachedStrip.update(entries: cachedEntries, images: images) && cachedStrip.itemViews.allSatisfy(\.isEditable),
+                   "Editability changes must bypass the unchanged-content fast path")
+            departedAppIcon = cachedStrip.itemViews[2].appIcon.image
+            cachedStrip.update(entries: Array(cachedEntries.prefix(2)), images: images)
+            let replacement = ModernMenuBarEntry(id: cachedEntries[0].id, name: "Replacement", bundleID: "com.example.replacement",
+                                                pid: cachedEntries[0].pid, frame: .zero, positionKey: "status:replacement",
+                                                identifier: "", nativeTitle: "", isVisible: true)
+            cachedStrip.update(entries: [replacement], images: [:])
+            assert(iconLoads == 3, "A reused PID with a different bundle must not inherit another application's icon")
+            cachedStrip.update(entries: [], images: [:])
+            cachedStrip.loadAppIcon = { _ in nil }
+            cachedStrip.update(entries: [replacement], images: [:])
+            assert(cachedStrip.itemViews[0].icon.image == nil)
+            cachedStrip.loadAppIcon = { _ in NSImage(size: NSSize(width: 24, height: 24)) }
+            assert(cachedStrip.update(entries: [replacement], images: [:]) && cachedStrip.itemViews[0].icon.image != nil,
+                   "An icon unavailable during launch must be retried rather than cached as missing forever")
+        }
+        assert(departedAppIcon == nil, "Departed processes must leave the app-icon cache and native views")
+        assert(cachedStrip.itemViews[0].icon.image != nil, "Eviction must preserve the remaining application's fallback icon")
+
         let host = NSHostingView(rootView: ModernMenuBarCollection(
             entries: entries, images: [:], showAppIcons: false, isEditable: true, emptyPlaceholder: nil,
             onDrop: { _, _ in assertionFailure("Browsing must not reorder menu bar items") },
@@ -244,5 +292,6 @@ struct ModernLayoutViewRegression {
         print("Insertion marker: one row, fixed geometry, bilingual two-line rendering, label hit testing, selection and distinct spacer behavior passed")
         print("Spacer views: trimmed text, template symbols, blank content, stable native views and edit/remove actions passed")
         print("Palette: complete label dimensions and visible text retained in the native drag preview")
+        print("Incremental views: unchanged layout skipped, app icons fetched only when displayed and shared per process, fresh glyphs and editing state preserved, departed icons released")
     }
 }

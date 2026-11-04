@@ -130,7 +130,8 @@ final class ModernMenuBarLayoutModel: ObservableObject {
             return
         }
         isScanning = true
-        isRefreshing = shouldCaptureImages
+        if isRefreshing != shouldCaptureImages { isRefreshing = shouldCaptureImages }
+        let visibilityBeforeScan = visibility
         let displayID = currentDisplayID
         let automaticProfileID = displayID != lastDisplayID ? displayID.flatMap { displayID in
             profiles.first(where: { $0.automaticDisplayID == displayID })?.id
@@ -138,7 +139,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         lastDisplayID = displayID
         defer {
             isScanning = false
-            isRefreshing = false
+            if isRefreshing { isRefreshing = false }
             if refreshPending {
                 refreshPending = false
                 Task { [weak self] in await self?.refresh() }
@@ -148,21 +149,21 @@ final class ModernMenuBarLayoutModel: ObservableObject {
             }
         }
         var positions = try? store.positions()
-        canEdit = positions != nil
+        if canEdit != (positions != nil) { canEdit = positions != nil }
         var approvals = try? visibilityStore.approvals()
-        canChangeVisibility = approvals != nil
+        if canChangeVisibility != (approvals != nil) { canChangeVisibility = approvals != nil }
         visibility = approvals ?? [:]
         var result = await scan(applications: applications(), positions: positions ?? [:])
         // MenuBarAgent can create the preference file after the settings window opens.
         // Retry after the AX scan so a transient startup read does not leave ordering disabled.
         if positions == nil {
             positions = try? store.positions()
-            canEdit = positions != nil
+            if canEdit != (positions != nil) { canEdit = positions != nil }
             if let positions { result = await scan(applications: applications(), positions: positions) }
         }
         if approvals == nil {
             approvals = try? visibilityStore.approvals()
-            canChangeVisibility = approvals != nil
+            if canChangeVisibility != (approvals != nil) { canChangeVisibility = approvals != nil }
             visibility = approvals ?? [:]
         }
         if !Task.isCancelled {
@@ -181,11 +182,16 @@ final class ModernMenuBarLayoutModel: ObservableObject {
                             return left == right ? $0.id < $1.id : left > right
                         }
                     }
-                } catch { errorMessage = error.localizedDescription }
+                } catch {
+                    if errorMessage != error.localizedDescription { errorMessage = error.localizedDescription }
+                }
             }
+            let layoutChanged = nativePositions != (positions ?? [:]) || visibilityBeforeScan != visibility
             nativePositions = positions ?? [:]
-            entries = result
-            itemImages = appState != nil ? imageStore.images(for: result) : [:]
+            // Visibility and spacer positions also affect the computed section contents.
+            if entries != result || layoutChanged { entries = result }
+            let images = appState != nil ? imageStore.images(for: result) : [:]
+            if itemImages != images { itemImages = images }
             if shouldCaptureImages, appState != nil, !isApplying, !isCapturingImages {
                 _ = try? await captureImages(for: result)
             }
@@ -941,11 +947,10 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         if current != cleaned { try store.save(cleaned, replacing: current) }
     }
 
+    private var applicationCache = ModernMenuBarDiscovery.ApplicationCache()
+
     private func applications() -> [ModernMenuBarDiscovery.Application] {
-        NSWorkspace.shared.runningApplications.compactMap { app in
-            guard !app.isTerminated, let bundleID = app.bundleIdentifier else { return nil }
-            return ModernMenuBarDiscovery.Application(pid: app.processIdentifier, bundleID: bundleID, name: app.localizedName ?? bundleID)
-        }
+        applicationCache.applications(NSWorkspace.shared.runningApplications)
     }
 
     private func captureCurrentImages(bundleID: String? = nil) async throws -> Set<String> {
@@ -962,7 +967,8 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         let captured = try await imageStore.capture(current) {
             await self.scan(applications: participants, positions: positions)
         }
-        itemImages = imageStore.images(for: entries)
+        let images = imageStore.images(for: entries)
+        if itemImages != images { itemImages = images }
         return captured
     }
 

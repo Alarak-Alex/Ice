@@ -44,9 +44,9 @@ struct ModernMenuBarCollection: NSViewRepresentable {
         strip.onDrop = onDrop
         strip.onSpacerChanged = onSpacerChanged
         strip.onRemoveSpacer = onRemoveSpacer
-        strip.placeholder.stringValue = emptyPlaceholder ?? ""
-        strip.update(entries: entries, images: images)
-        scroll.needsLayout = true
+        let placeholder = emptyPlaceholder ?? ""
+        if strip.placeholder.stringValue != placeholder { strip.placeholder.stringValue = placeholder }
+        if strip.update(entries: entries, images: images) { scroll.needsLayout = true }
     }
 }
 
@@ -75,8 +75,11 @@ private final class MenuBarLayoutScrollView: NSScrollView {
     override func layout() {
         super.layout()
         guard let strip = documentView as? MenuBarLayoutItemStrip else { return }
-        strip.setFrameSize(NSSize(width: max(contentSize.width, strip.requiredWidth), height: contentSize.height))
-        strip.needsLayout = true
+        let size = NSSize(width: max(contentSize.width, strip.requiredWidth), height: contentSize.height)
+        if strip.frame.size != size {
+            strip.setFrameSize(size)
+            strip.needsLayout = true
+        }
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -192,6 +195,13 @@ final class MenuBarLayoutItemStrip: NSView {
     var onRemoveSpacer: ((String) -> Void)?
     let placeholder = NSTextField(labelWithString: "")
     private(set) var itemViews = [MenuBarLayoutItemView]()
+    var loadAppIcon: (pid_t) -> NSImage? = { NSRunningApplication(processIdentifier: $0)?.icon }
+    private var applicationIcons = [pid_t: (bundleID: String, image: NSImage)]()
+    private var displayedEntries: [ModernMenuBarEntry]?
+    private var displayedImages = [String: NSImage]()
+    private var displayedShowAppIcons = true
+    private var displayedIsEditable = false
+    private var hasMissingAppIcons = false
     private var insertionIndex: Int? { didSet { needsDisplay = true } }
     private var selectedID: String?
     private var panStart: (mouseX: CGFloat, offset: CGFloat)?
@@ -228,7 +238,19 @@ final class MenuBarLayoutItemStrip: NSView {
         panStart = nil
     }
 
-    func update(entries: [ModernMenuBarEntry], images: [String: NSImage]) {
+    @discardableResult
+    func update(entries: [ModernMenuBarEntry], images: [String: NSImage]) -> Bool {
+        let hidesPlaceholder = !entries.isEmpty || placeholder.stringValue.isEmpty
+        guard displayedEntries != entries || displayedImages != images ||
+                displayedShowAppIcons != showAppIcons || displayedIsEditable != isEditable ||
+                placeholder.isHidden != hidesPlaceholder || hasMissingAppIcons else { return false }
+        displayedEntries = entries
+        displayedImages = images
+        displayedShowAppIcons = showAppIcons
+        displayedIsEditable = isEditable
+        hasMissingAppIcons = false
+        let livePIDs = Set(entries.filter { !$0.isSpacer && !$0.isInsertionMarker }.map(\.pid))
+        applicationIcons = applicationIcons.filter { livePIDs.contains($0.key) }
         let previous = Dictionary(uniqueKeysWithValues: itemViews.map { ($0.entryID, $0) })
         let identifiers = Set(entries.map(\.id))
         for view in itemViews where !identifiers.contains(view.entryID) { view.removeFromSuperview() }
@@ -237,7 +259,8 @@ final class MenuBarLayoutItemStrip: NSView {
             item.spacer = entry.spacer
             item.isInsertionMarker = entry.isInsertionMarker
             item.updateImages(itemImage: entry.isSpacer || entry.isInsertionMarker ? nil : images[entry.id],
-                              appImage: entry.isSpacer || entry.isInsertionMarker ? nil : NSRunningApplication(processIdentifier: entry.pid)?.icon,
+                              appImage: !entry.isSpacer && !entry.isInsertionMarker && (showAppIcons || images[entry.id] == nil)
+                                ? appIcon(for: entry) : nil,
                               showAppIcon: showAppIcons && !entry.isSpacer && !entry.isInsertionMarker)
             item.isEditable = isEditable && (entry.isSpacer || entry.isInsertionMarker || entry.positionKey != nil)
             item.toolTip = entry.name
@@ -248,9 +271,21 @@ final class MenuBarLayoutItemStrip: NSView {
             if item.superview !== self { addSubview(item) }
             return item
         }
-        placeholder.isHidden = !itemViews.isEmpty || placeholder.stringValue.isEmpty
+        placeholder.isHidden = hidesPlaceholder
         select(selectedID)
         needsLayout = true
+        return true
+    }
+
+    private func appIcon(for entry: ModernMenuBarEntry) -> NSImage? {
+        if let cached = applicationIcons[entry.pid], cached.bundleID == entry.bundleID { return cached.image }
+        guard let image = loadAppIcon(entry.pid) else {
+            hasMissingAppIcons = true
+            applicationIcons.removeValue(forKey: entry.pid)
+            return nil
+        }
+        applicationIcons[entry.pid] = (entry.bundleID, image)
+        return image
     }
 
     private func select(_ id: String?) {
@@ -314,11 +349,16 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     let insertionLabel = NSTextField(wrappingLabelWithString: AppLanguage.localized("New Items\nhere"))
     var isEditable = false
     var spacer: MenuBarLayoutSpacer? {
-        didSet { needsDisplay = true; needsLayout = true }
+        didSet {
+            guard spacer != oldValue else { return }
+            needsDisplay = true
+            needsLayout = true
+        }
     }
     var isSpacer: Bool { spacer != nil }
     var isInsertionMarker = false {
         didSet {
+            guard isInsertionMarker != oldValue else { return }
             insertionLabel.isHidden = !isInsertionMarker
             needsDisplay = true
             needsLayout = true
@@ -331,6 +371,7 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     private var didDrag = false
     private(set) var isDragging = false
     private var hasItemImage = false
+    private var imageState: (item: NSImage?, app: NSImage?, showAppIcon: Bool, spacer: MenuBarLayoutSpacer?)?
     var preferredWidth: CGFloat {
         if isInsertionMarker { return 88 }
         if let spacer { return max(16, spacer.validatedWidth) }
@@ -338,6 +379,7 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     }
     var isSelected = false {
         didSet {
+            guard isSelected != oldValue else { return }
             layer?.backgroundColor = isSelected && !isInsertionMarker ? NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor : nil
             setAccessibilitySelected(isSelected)
         }
@@ -378,6 +420,9 @@ final class MenuBarLayoutItemView: NSView, NSDraggingSource {
     override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
 
     func updateImages(itemImage: NSImage?, appImage: NSImage?, showAppIcon: Bool) {
+        if let state = imageState, state.item === itemImage, state.app === appImage,
+           state.showAppIcon == showAppIcon, state.spacer == spacer { return }
+        imageState = (itemImage, appImage, showAppIcon, spacer)
         if let spacer {
             hasItemImage = false
             icon.image = spacer.content == .symbol

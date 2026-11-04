@@ -81,6 +81,20 @@ updated since 2025-09.
   icon fallback when their background cannot be removed safely.
   The resident image cache retains only currently discovered items; images of
   stopped applications remain on disk and load again when needed.
+- Background scans publish only changed entries, images, order or approvals.
+  Native layout views skip identical updates and load app icons only when
+  displayed, reusing them per process and releasing departed items. Discovery
+  caches metadata by retained application-object identity, evicts departed
+  applications and reloads new process objects, including PID reuse. Workspace
+  notifications compare object identity without querying dynamic PID properties
+  and coalesce bursts. The macOS 27 editor skips the legacy background-color
+  capture because its bars have their own background. Closed Settings windows
+  unmount their native content instead of retaining SwiftUI scroll prefetching;
+  reopening restores the selected pane. The five-second discovery fallback
+  remains active for delayed status-item registration, automatic display
+  profiles, and current menu-item hit-test frames.
+- The legacy composite capture path releases its manually allocated window-list
+  buffer on success and failure. Previously, every capture leaked that buffer.
 - The legacy Ice Bar and hiding engine have not been ported to MenuBarAgent.
   macOS 14–26 retain the original section editor, with drag cancellation, view
   reuse, and image-cache publication fixes.
@@ -197,6 +211,17 @@ the test process's queue: observation preserves event order without repeated
 delivery, cancellation stops delivery, and all four publishers release
 cancelled subscribers.
 
+Incremental-refresh checks first reproduced redundant publications from unchanged
+background scans. They now require zero publications while still observing
+external native-order and approval changes. Native-view checks cover unchanged
+updates, on-demand app-icon loading, reuse between items from one process,
+fresh glyphs, editing-state changes, PID reuse, missing-icon retry and release
+of departed process icons while the strip remains alive.
+Application-metadata fixtures count actual property reads: unchanged application
+objects must add no queries; departed objects must be released; restarted objects
+with reused PIDs and initially unavailable bundle identifiers must load fresh
+metadata.
+
 The palette preview checks that a native drag image retains the complete label
 and its text, rather than stretching only the glyph over the label's frame.
 Optional light/dark English/Chinese appearance snapshots can be generated with
@@ -225,7 +250,9 @@ preferences domains; they do not rearrange the user's menu bar.
 The navigation fixture loads the production sidebar with placeholder detail
 panes. It checks all six native table rows, first-mouse acceptance, isolated
 search and row hit areas, pane selection, navigation history and search filtering
-without unexpected navigation. On 2026-11-03 the user confirmed that physical
+without unexpected navigation. It also verifies three close/reopen cycles:
+closed content is unmounted and reopening restores the selected pane.
+On 2026-11-03 the user confirmed that physical
 sidebar clicks work after this rewrite. The latest installed style also passed
 a General-to-Menu-Bar accessibility navigation check and an App Icons switch
 on/off check, restoring the original preference afterward.
@@ -256,12 +283,34 @@ baseline for further verification; older restoration snapshots must not replace
 it.
 
 Performance samples taken on 2026-11-03 no longer contained the old
-`RunLoopLocalEventMonitor` queue-reposting hotspot. One post-change sample
-reported an 88.0 MB footprint (108.3 MB peak); a separate `leaks` run reported
-175 allocations / 5,648 bytes. The remaining roots were not conclusively
-attributed, workloads/lifetimes differed, and no controlled overall CPU or
-long-term memory comparison was performed. These checks do not establish
-zero leaks.
+`RunLoopLocalEventMonitor` queue-reposting hotspot. The additional performance
+pass used signed Release builds on a Mac mini with macOS 27.2. Sampling uses
+`top -l <intervals + 1> -s 2 -pid <pid>` and excludes the first cumulative row.
+
+| Sample | Duration | Mean CPU | Peak CPU | Physical footprint |
+| --- | --- | --- | --- | --- |
+| Original layout page, 2026-11-03 | 30 s | 3.42% | 14.1% | 94.3 MiB |
+| Final build, Settings closed, 2026-11-04 | 120 s | 0.66% | 8.3% | 86.3 MiB |
+
+These rows have different UI workloads, process lifetimes and uncontrolled
+desktop interaction; they do not establish a controlled overall CPU reduction
+or long-term memory savings. Earlier intermediate builds fluctuated between
+0.49% and 5.49% mean CPU, so their lowest sample is not an optimization claim.
+The final build retains the five-second discovery fallback: skipping it when
+Settings is closed would miss display changes and delayed item registration.
+
+The final `leaks -quiet <pid>` snapshot reported 60 allocations / 3,008 bytes
+associated with AppKit's `NSToolbarItemViewer` accessibility custom actions.
+The separate raw window-list buffer leak found during source review is fixed
+with unconditional deallocation. Cache-release and closed-window lifetime
+regressions pass, but the snapshot does not establish zero leaks or resolve
+ownership of the remaining toolbar allocations.
+
+After the final installation and measurements on 2026-11-04, all 50 native
+positions and 53 approval records matched the fresh pre-install files
+byte-for-byte. Raw layout profiles and the active profile also matched, and no
+temporary visibility journals remained. This preserved the user's current
+manually authored layout.
 
 The public stage summary is synchronized in [README.md](README.md) and
 [README.zh-CN.md](README.zh-CN.md).
