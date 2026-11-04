@@ -744,7 +744,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
             let anchor = profiles[profileIndex].spacers.first(where: { $0.id == spacerID })?.beforeID
             spacerManager.synchronize(activeProfile?.spacers ?? [])
             let sourceKey = MenuBarSpacerManager.positionKey(for: spacerID)
-            let current = try await registeredSpacerPositions(activeProfile?.spacers ?? [])
+            let current = try spacerPositions(activeProfile?.spacers ?? [])
             written = current
             if current[sourceKey] != nil {
                 let candidates = displayEntries(in: section).filter { !$0.isInsertionMarker && $0.id != "spacer:\(spacerID.uuidString)" }
@@ -854,7 +854,7 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         do {
             initial = try store.positions()
             spacerManager?.synchronize(profile.spacers)
-            let positions = try await registeredSpacerPositions(profile.spacers)
+            let positions = try spacerPositions(profile.spacers)
             updated = positions
             let approvals = try visibilityStore.approvals()
             for (bundle, section) in profile.sections {
@@ -927,16 +927,24 @@ final class ModernMenuBarLayoutModel: ObservableObject {
         spacerManager?.synchronize(spacers)
     }
 
-    private func registeredSpacerPositions(_ spacers: [MenuBarLayoutSpacer]) async throws -> [String: Double] {
-        let keys = spacers.filter { $0.section == .visible }.map { MenuBarSpacerManager.positionKey(for: $0.id) }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
-        var positions = try store.positions()
-        // Native registration completes on a later run-loop turn.
-        while !keys.allSatisfy({ positions[$0] != nil }) && ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(40))
-            positions = try store.positions()
+    private func spacerPositions(_ spacers: [MenuBarLayoutSpacer]) throws -> [String: Double] {
+        let visible = spacers.filter { $0.section == .visible }
+        let keys = Set(visible.map { MenuBarSpacerManager.positionKey(for: $0.id) })
+        guard keys.isSubset(of: spacerManager?.visiblePositionKeys ?? []) else {
+            throw MenuBarPositionStore.Failure.invalidPositions
         }
-        guard keys.allSatisfy({ positions[$0] != nil }) else { throw MenuBarPositionStore.Failure.invalidPositions }
+        let original = try store.positions()
+        var positions = original
+        // MenuBarAgent's saved order is not a registry: new native hosts may have no saved slot.
+        for spacer in visible {
+            let key = MenuBarSpacerManager.positionKey(for: spacer.id)
+            guard positions[key] == nil else { continue }
+            let maximum = positions.values.max() ?? 0
+            let position = maximum + Double(spacer.validatedWidth)
+            guard position.isFinite, position > maximum else { throw MenuBarPositionStore.Failure.invalidPositions }
+            positions[key] = position
+        }
+        if positions != original { try store.save(positions, replacing: original) }
         return positions
     }
 

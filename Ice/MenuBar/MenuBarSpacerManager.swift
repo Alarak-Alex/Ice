@@ -3,6 +3,7 @@ import Cocoa
 /// Owns the native status items represented by the active configuration's spacers.
 @MainActor
 protocol MenuBarSpacerManaging: AnyObject {
+    var visiblePositionKeys: Set<String> { get }
     func synchronize(_ spacers: [MenuBarLayoutSpacer])
 }
 
@@ -17,6 +18,14 @@ final class MenuBarSpacerManager: MenuBarSpacerManaging {
 
     static func positionKey(for id: UUID) -> String {
         "status:\(Constants.bundleIdentifier)::Spacer-\(id.uuidString)"
+    }
+
+    var visiblePositionKeys: Set<String> {
+        Set(items.compactMap { id, item in
+            guard item.isVisible, item.button != nil,
+                  item.autosaveName == "Spacer-\(id.uuidString)" else { return nil }
+            return Self.positionKey(for: id)
+        })
     }
 
     func synchronize(_ spacers: [MenuBarLayoutSpacer]) {

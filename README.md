@@ -50,9 +50,11 @@ November 4, 2026.
   registration fails. Native identities remain stable through content edits,
   and existing blank spacers remain compatible. Icon/spacer sorting uses the
   same native order, preserves hidden spacer anchors, and supports undo.
+  New spacers initialize missing saved positions only after verifying their
+  owned native hosts, avoiding false registration timeouts on macOS 27.
   The palette uses a shaded label and retains its complete text during dragging.
-  Startup registration of a saved
-  spacer was verified locally; physical palette drag/drop and placement still
+  Saved-spacer startup registration and native-host initialization with
+  temporary preference files were verified locally; physical palette drag/drop and placement still
   need runtime acceptance.
 - **Hidden-item reveal on macOS 27:** blank-space clicks are routed to
   temporarily reveal the Hidden section, excluding Always Hidden. Separate

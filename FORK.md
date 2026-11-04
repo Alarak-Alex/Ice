@@ -50,6 +50,10 @@ updated since 2025-09.
   The editor validates symbol names and preserves current placement when editing
   an older snapshot. Blank content has an explicit image; native items keep
   stable button/accessibility identifiers. Unchanged content reuses its image.
+  New native hosts need not already have a saved MenuBarAgent order entry:
+  only verified, visible Ice-owned hosts may initialize missing slots, using
+  guarded writes that preserve existing positions. Native-host initialization,
+  hidden-to-visible moves and undo were checked with temporary preferences.
   Saved-spacer startup registration was verified locally; physical palette
   drag/drop and placement remain unverified.
 - Blank-menu-space clicks on macOS 27 route to the modern hidden-section

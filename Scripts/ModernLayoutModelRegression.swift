@@ -23,7 +23,9 @@ private final class FixtureApplication: NSRunningApplication, @unchecked Sendabl
     let positions: MenuBarPositionStore
     private(set) var widths = [UUID: CGFloat]()
     private(set) var visible = Set<UUID>()
+    private(set) var visiblePositionKeys = Set<String>()
     var registersItems = true
+    var persistsPositions = true
     var registrationLimit: Int?
     var externalRegistrationKey: String?
 
@@ -35,7 +37,8 @@ private final class FixtureApplication: NSRunningApplication, @unchecked Sendabl
         let original = try! positions.positions()
         var updated = original
         let registering = spacers.filter { registersItems && $0.section == .visible }.prefix(registrationLimit ?? spacers.count)
-        for spacer in registering {
+        visiblePositionKeys = Set(registering.map { MenuBarSpacerManager.positionKey(for: $0.id) })
+        for spacer in registering where persistsPositions {
             let key = MenuBarSpacerManager.positionKey(for: spacer.id)
             if updated[key] == nil { updated[key] = (updated.values.max() ?? 0) + 40 }
         }
@@ -94,6 +97,7 @@ struct ModernLayoutModelRegression {
         let nativeItem = nativeSpacers.items[nativeSpacer.id]!
         let nativeName = "Spacer-\(nativeSpacer.id.uuidString)"
         assert(nativeItem.autosaveName == nativeName)
+        assert(nativeSpacers.visiblePositionKeys == [MenuBarSpacerManager.positionKey(for: nativeSpacer.id)])
         assert(nativeItem.button?.image?.size == NSSize(width: 16, height: 16),
                "A spacer must supply an explicit blank image at its configured width")
         assert(nativeItem.button?.identifier?.rawValue == nativeName)
@@ -129,6 +133,7 @@ struct ModernLayoutModelRegression {
         assert(nativeSpacers.items[nativeSpacer.id] === nativeItem, "Content edits must retain native identity")
         nativeSpacers.synchronize([])
         assert(nativeSpacers.items.isEmpty)
+        assert(nativeSpacers.visiblePositionKeys.isEmpty, "Removed hosts must not authorize a new native position")
         nativeSpacers.synchronize([nativeSpacer])
         assert(nativeSpacers.items[nativeSpacer.id]?.button?.image != nil,
                "Removing a spacer must also discard cached render state before recreating its host")
@@ -144,6 +149,29 @@ struct ModernLayoutModelRegression {
         try PropertyListSerialization.data(fromPropertyList: ["trackedApplications": tracked, "unrelated": "keep"], format: .binary, options: 0).write(to: visibilityURL)
         let positions = MenuBarPositionStore(url: positionURL, backupURL: root.appendingPathComponent("order.before.plist"))
         let visibility = MenuBarVisibilityStore(url: visibilityURL, backupURL: root.appendingPathComponent("visibility.before.plist"))
+        let nativeSuite = suite + ".NativeHosts"
+        let nativeDefaults = UserDefaults(suiteName: nativeSuite)!
+        defer { nativeDefaults.removePersistentDomain(forName: nativeSuite) }
+        let nativeModel = ModernMenuBarLayoutModel(defaults: nativeDefaults, positionStore: positions,
+                                                   visibilityStore: visibility, spacerManager: nativeSpacers) { _, _, _, _ in [] }
+        await nativeModel.drop("palette-spacer", in: .visible, before: nil)
+        assert(nativeModel.errorMessage == nil && nativeSpacers.items.count == 1,
+               "A real NSStatusItem must work without an automatically saved position")
+        let liveSpacer = nativeModel.activeProfile!.spacers[0]
+        assert((try! positions.positions())[MenuBarSpacerManager.positionKey(for: liveSpacer.id)] != nil)
+        await nativeModel.undo()
+        assert(nativeSpacers.items.isEmpty && (try! positions.positions()) == initial)
+        await nativeModel.drop("palette-spacer", in: .hidden, before: nil)
+        let hiddenSpacer = nativeModel.activeProfile!.spacers[0]
+        assert(nativeSpacers.visiblePositionKeys.isEmpty && (try! positions.positions()) == initial)
+        await nativeModel.drop("spacer:\(hiddenSpacer.id.uuidString)", in: .visible, before: nil)
+        assert(nativeModel.errorMessage == nil &&
+               nativeSpacers.visiblePositionKeys.contains(MenuBarSpacerManager.positionKey(for: hiddenSpacer.id)))
+        await nativeModel.undo()
+        assert(nativeSpacers.visiblePositionKeys.isEmpty && (try! positions.positions()) == initial)
+        nativeModel.removeSpacer("spacer:\(hiddenSpacer.id.uuidString)")
+        assert(nativeSpacers.items.isEmpty)
+        print("Native spacer positions: real hosts without saved positions, hidden-to-visible initialization and undo passed")
         let spacers = FixtureSpacers(positions: positions)
         func currentPositions() -> [String: Double] { try! positions.positions() }
         func currentApprovals() -> [String: Bool] { try! visibility.approvals() }
@@ -298,6 +326,17 @@ struct ModernLayoutModelRegression {
         assert(currentProfiles() == profilesBeforeFailure, "A stale spacer drag must not create a new spacer")
         await model.drop("palette-spacer", in: .visible, before: "deleted-item")
         assert(currentProfiles() == profilesBeforeFailure, "A stale spacer target must not append a spacer")
+
+        spacers.persistsPositions = false
+        await model.drop("palette-spacer", in: .visible, before: keys[0])
+        assert(model.errorMessage == nil && model.activeProfile!.spacers.count == 1,
+               "A new native host without a saved MenuBarAgent position must be initialized, not timed out")
+        let initializedKey = MenuBarSpacerManager.positionKey(for: model.activeProfile!.spacers[0].id)
+        assert(currentPositions()[initializedKey]! > currentPositions()[keys[0]]!)
+        await model.undo()
+        assert(currentPositions() == positionsBeforeFailure && currentProfiles() == profilesBeforeFailure,
+               "Undo must remove only the position and metadata initialized for the new spacer")
+        spacers.persistsPositions = true
 
         let beforeSpacer = currentPositions()
         await model.drop("palette-spacer", in: .visible, before: keys[0])
